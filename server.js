@@ -31,8 +31,8 @@ let gameState = {
 
     // Game Memory
     temp: { 
-        diceP1: null, // Stores P1's total
-        diceRollP1: [], // Stores P1's visual dice
+        diceP1: null, 
+        diceRollP1: [], 
         rps: { 1: null, 2: null }, 
         hlCurrent: 7, 
         tttBoard: Array(9).fill(null) 
@@ -45,7 +45,7 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 io.on('connection', (socket) => {
     let currentUser = null;
 
-    // AUTH
+    // --- AUTHENTICATION ---
     socket.on('auth', ({ username, password }) => {
         if (!users[username]) { users[username] = { password, balance: 1000 }; saveUsers(); }
         if (users[username].password === password) {
@@ -56,12 +56,43 @@ io.on('connection', (socket) => {
         } else socket.emit('auth_fail', 'WRONG PASSWORD');
     });
 
-    // CHAT
+    // --- WALLET & TICKETS ---
+    socket.on('wallet_action', (data) => {
+        if(!currentUser) return;
+        
+        if(data.type === 'deposit') {
+            const amt = parseInt(data.amount);
+            if(amt > 0) {
+                users[currentUser].balance += amt;
+                saveUsers();
+                socket.emit('balance_update', users[currentUser].balance);
+                socket.emit('alert', `DEPOSITED ${amt} TC SUCCESS!`);
+            }
+        } 
+        else if(data.type === 'withdraw') {
+            const amt = parseInt(data.amount);
+            if(amt > 0 && users[currentUser].balance >= amt) {
+                users[currentUser].balance -= amt;
+                saveUsers();
+                socket.emit('balance_update', users[currentUser].balance);
+                socket.emit('alert', `WITHDRAWAL OF ${amt} TC PROCESSED.`);
+            } else {
+                socket.emit('alert', "INSUFFICIENT FUNDS.");
+            }
+        }
+        else if(data.type === 'ticket') {
+            // In a real app, save to DB. Here we log it.
+            console.log(`[TICKET] ${currentUser}: ${data.msg}`);
+            socket.emit('alert', "SUPPORT TICKET SENT.");
+        }
+    });
+
+    // --- CHAT ---
     socket.on('chat_msg', (msg) => {
         if(currentUser) io.emit('chat_msg', { user: currentUser, text: msg, color: '#fff' });
     });
 
-    // SPECTATOR BETTING
+    // --- SPECTATOR BETTING ---
     socket.on('place_bet', ({ amount, target }) => {
         if (!currentUser || !gameState.matchActive || gameState.bettingLocked) return;
         if (users[currentUser].balance < amount) return;
@@ -74,22 +105,20 @@ io.on('connection', (socket) => {
         io.emit('chat_msg', { user: 'SYSTEM', text: `${currentUser} bet ${amount} on P${target}`, color: '#aaa' });
     });
 
-    // SEAT REQUEST (Strict 1 Seat Rule)
+    // --- SEATS ---
     socket.on('request_seat', (n) => {
         if (!currentUser) return;
-        // Check if user is already seated ANYWHERE
         if (gameState.seats[1] === currentUser || gameState.seats[2] === currentUser) {
-            socket.emit('error_msg', "YOU ALREADY HAVE A SEAT!");
+            socket.emit('alert', "YOU ARE ALREADY SEATED.");
             return;
         }
-        if (gameState.seats[n]) return; // Seat taken
+        if (gameState.seats[n]) return; 
 
         gameState.seats[n] = currentUser;
         gameState.sockets[n] = socket.id;
 
         if (!gameState.hostSeat) gameState.hostSeat = n;
 
-        // Start Negotiation
         if (gameState.seats[1] && gameState.seats[2]) {
             gameState.negotiating = true;
             io.to(gameState.sockets[gameState.hostSeat]).emit('prompt_proposal');
@@ -98,7 +127,7 @@ io.on('connection', (socket) => {
         io.emit('state_update', gameState);
     });
 
-    // PROPOSAL FLOW
+    // --- NEGOTIATION ---
     socket.on('propose_terms', (terms) => {
         if (gameState.sockets[gameState.hostSeat] !== socket.id) return;
         gameState.settings = terms;
@@ -111,14 +140,13 @@ io.on('connection', (socket) => {
             gameState.matchActive = true;
             gameState.scores = { 1: 0, 2: 0 };
             gameState.turn = 1;
-            // Reset Game Memory
             gameState.temp = { diceP1: null, diceRollP1: [], rps: { 1: null, 2: null }, hlCurrent: 7, tttBoard: Array(9).fill(null) };
             
-            io.emit('chat_msg', { user: 'SYSTEM', text: `MATCH LIVE: ${gameState.settings.game.toUpperCase()}`, color: '#2ecc71' });
+            io.emit('chat_msg', { user: 'SYSTEM', text: `MATCH STARTED: ${gameState.settings.game.toUpperCase()}`, color: '#2ecc71' });
             io.emit('state_update', gameState);
-            io.emit('game_reset', gameState.settings.game); // Force clients to clear visuals
+            io.emit('game_reset', gameState.settings.game); 
 
-            // Voice
+            // Trigger Voice
             io.to(gameState.sockets[1]).emit('start_voice', { initiator: true });
             io.to(gameState.sockets[2]).emit('start_voice', { initiator: false });
         } else {
@@ -130,7 +158,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // GAMEPLAY
+    // --- GAMEPLAY LOGIC ---
     socket.on('game_action', (data) => {
         if (!gameState.matchActive) return;
         
@@ -146,38 +174,29 @@ io.on('connection', (socket) => {
         let switchTurn = true;
         const G = gameState.settings.game;
 
-        // --- DICE LOGIC (2 SETS) ---
+        // 1. DICE
         if (G === 'dice') {
             const roll = [r6(), r6(), r6()];
             const total = roll.reduce((a,b)=>a+b,0);
-            
-            // Send animation for specific seat
             io.emit('anim_dice', { seat: gameState.turn, roll });
             
             if (gameState.turn === 1) {
-                // P1 just rolled
                 gameState.temp.diceP1 = total;
                 gameState.temp.diceRollP1 = roll;
-                // Don't end round, wait for P2
-                switchTurn = true;
             } else {
-                // P2 just rolled, compare with stored P1
                 if (gameState.temp.diceP1 > total) win = 1;
                 else if (total > gameState.temp.diceP1) win = 2;
                 else win = 'draw';
-                
-                gameState.temp.diceP1 = null; 
-                roundOver = true;
+                gameState.temp.diceP1 = null; roundOver = true;
             }
         }
-        
-        // --- COIN ---
+        // 2. COIN
         else if (G === 'coin') {
             const res = Math.random() < 0.5 ? 'H' : 'T';
             io.emit('anim_coin', { result: res });
             if (data.guess === res) { win = gameState.turn; roundOver = true; } else roundOver = true;
         }
-        // --- HI-LO ---
+        // 3. HI-LO
         else if (G === 'hl') {
             let next = r13();
             while(next === gameState.temp.hlCurrent) next = r13();
@@ -187,15 +206,15 @@ io.on('connection', (socket) => {
             gameState.temp.hlCurrent = next;
             if (isHigh || isLow) { win = gameState.turn; roundOver = true; } else roundOver = true;
         }
-        // --- ROULETTE ---
+        // 4. ROULETTE
         else if (G === 'roulette') {
             const isRed = Math.random() < 0.5;
             const res = isRed ? 'RED' : 'BLACK';
-            const angle = 1440 + Math.random() * 360; // 4 spins minimum
+            const angle = 1440 + Math.random() * 360; 
             io.emit('anim_roulette', { angle, result: res });
             if (data.guess === res) { win = gameState.turn; roundOver = true; } else roundOver = true;
         }
-        // --- RPS ---
+        // 5. RPS
         else if (G === 'rps') {
             const seat = gameState.seats[1] === currentUser ? 1 : 2;
             gameState.temp.rps[seat] = data.guess;
@@ -213,7 +232,7 @@ io.on('connection', (socket) => {
                 roundOver = true; switchTurn = true;
             }
         }
-        // --- TTT ---
+        // 6. TTT
         else if (G === 'ttt') {
             if (gameState.temp.tttBoard[data.index] !== null) return;
             const sym = gameState.turn === 1 ? 'X' : 'O';
@@ -223,15 +242,15 @@ io.on('connection', (socket) => {
             else if (!gameState.temp.tttBoard.includes(null)) { win = 'draw'; roundOver = true; }
         }
 
-        // RESOLUTION (Reduced Delay)
+        // RESULT HANDLING (Fast)
         if (roundOver || switchTurn) {
-            const delay = (G === 'roulette') ? 3000 : 1200; // Roulette needs more time
+            const delay = (G === 'roulette') ? 3000 : 1000;
             
             setTimeout(() => {
                 if (roundOver) {
                     if (win && win !== 'draw') {
                         gameState.scores[win]++;
-                        io.emit('chat_msg', { user: 'REF', text: `POINT P${win}!`, color: '#2ecc71' });
+                        io.emit('chat_msg', { user: 'REF', text: `POINT PLAYER ${win}`, color: '#2ecc71' });
                         payoutBets(win);
                     } else if (win === 'draw') {
                         io.emit('chat_msg', { user: 'REF', text: `DRAW`, color: '#aaa' });
@@ -240,7 +259,7 @@ io.on('connection', (socket) => {
                     checkMatchWin();
                 }
                 gameState.bettingLocked = false;
-                if(!gameState.matchActive) return; // Don't switch if match ended
+                if(!gameState.matchActive) return;
                 
                 gameState.turn = gameState.turn === 1 ? 2 : 1;
                 io.emit('state_update', gameState);
@@ -248,7 +267,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // HELPERS
     function payoutBets(winnerSeat) {
         gameState.currentBets.forEach(bet => {
             if (bet.target === winnerSeat) users[bet.user].balance += (bet.amount * 2);
@@ -283,13 +301,15 @@ io.on('connection', (socket) => {
         }
     }
     
-    // Voice Signaling
+    // Voice
     socket.on('voice_signal', (data) => {
         const target = gameState.sockets[1] === socket.id ? 2 : 1;
         if(gameState.sockets[target]) io.to(gameState.sockets[target]).emit('voice_signal', data);
     });
+    
+    // Leave
     socket.on('leave_seat', () => {
-        if(gameState.matchActive) { socket.emit('error_msg', "MATCH LOCKED"); return; }
+        if(gameState.matchActive) { socket.emit('alert', "MATCH LOCKED"); return; }
         if(gameState.seats[1] === currentUser) { gameState.seats[1] = null; gameState.sockets[1] = null; }
         if(gameState.seats[2] === currentUser) { gameState.seats[2] = null; gameState.sockets[2] = null; }
         io.emit('state_update', gameState);
