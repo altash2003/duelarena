@@ -2,14 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>CASINO DUEL ARENA</title>
     <script src="/socket.io/socket.io.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
     <style>
         :root { --bg-dark: #121216; --bg-panel: #1e1e24; --accent: #feca57; --text: #fff; --p1: #ff4757; --p2: #2e86de; }
         * { box-sizing: border-box; }
-        body { background-color: var(--bg-dark); color: var(--text); font-family: 'Press Start 2P', cursive; margin: 0; height: 100vh; overflow: hidden; display: flex; }
+        body { 
+            background-color: var(--bg-dark); color: var(--text); 
+            font-family: 'Press Start 2P', cursive; margin: 0; height: 100vh; overflow: hidden; display: flex; 
+            user-select: none; -webkit-user-select: none; /* PREVENT SELECTION */
+        }
         
         /* TOP BAR CREDITS */
         .credit-bar { position: absolute; top: 10px; right: 20px; font-size: 12px; color: var(--accent); background: #000; padding: 10px; border: 2px solid #333; z-index: 1000; }
@@ -18,37 +22,55 @@
         .game-section { flex: 1; display: flex; flex-direction: column; }
         .social-sidebar { width: 320px; display: flex; flex-direction: column; gap: 15px; }
 
+        .top-bar { display: flex; justify-content: space-between; border-bottom: 4px solid #333; padding-bottom: 10px; margin-bottom: 10px; align-items: center; }
+        .info-txt { font-size: 10px; color: #aaa; } .info-txt span { color: var(--accent); }
+
         .arena { display: grid; grid-template-columns: 1fr 1.5fr 1fr; gap: 20px; flex-grow: 1; }
         .player-panel { background: var(--bg-panel); border: 4px solid #333; display: flex; flex-direction: column; align-items: center; transition: 0.3s; position: relative; }
         .player-panel.active-turn { border-color: #2ecc71; box-shadow: 0 0 20px rgba(46,204,113,0.3); }
 
         .p-name { background: #000; width: 100%; text-align: center; padding: 10px; font-size: 10px; }
         .score { font-size: 60px; font-family: 'Rajdhani'; margin: auto; }
-        .controls { width: 100%; padding: 10px; display: flex; flex-direction: column; gap: 5px; }
+        .controls { width: 100%; padding: 10px; display: flex; flex-direction: column; gap: 5px; justify-content:center; }
 
         .center-stage { background: #000; border: 4px solid #333; display: flex; flex-direction: column; justify-content: center; align-items: center; }
         .visuals { width: 100%; display: flex; justify-content: center; align-items: center; flex-grow: 1; perspective: 1000px; }
+        .status-bar { width: 100%; text-align: center; background: #222; padding: 5px; font-size: 10px; color: #aaa; }
+
+        /* SIDEBAR PANELS */
+        .panel { background: var(--bg-panel); border: 4px solid #000; display: flex; flex-direction: column; overflow: hidden; }
+        .panel-head { background: #2f3640; padding: 10px; font-size: 10px; border-bottom: 4px solid #000; }
         
+        .chat-box { flex-grow: 1; }
+        .chat-log { flex-grow: 1; overflow-y: auto; padding: 10px; font-family: 'Rajdhani'; font-size: 14px; color: #ccc; }
+        .chat-input { background: #000; border: none; border-top: 4px solid #333; color: #fff; padding: 15px; width: 100%; font-family: 'Press Start 2P'; font-size: 10px; outline: none; }
+
+        .bet-area { padding: 15px; background: #191919; }
+        .input-std { width: 100%; background: #000; border: 2px solid #555; color: #fff; padding: 10px; font-family: 'Press Start 2P'; font-size: 10px; margin-bottom: 5px; }
+
         /* MODALS */
         .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #1e1e24; border: 4px solid var(--accent); padding: 20px; z-index: 2000; text-align: center; box-shadow: 0 0 50px rgba(0,0,0,0.8); display: none; }
         .modal-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:1500; display: none; }
         
         .btn { width: 100%; padding: 15px; background: #333; color: #fff; border: 2px solid #000; cursor: pointer; font-family: 'Press Start 2P'; font-size: 10px; }
         .btn:hover { background: #444; } .btn-green { background: #2ecc71; color: #000; } .btn-red { background: #ff4757; }
-        .input-std { width: 100%; background: #000; border: 2px solid #555; color: #fff; padding: 10px; font-family: 'Press Start 2P'; font-size: 10px; margin-bottom: 5px; }
 
-        /* ANIMATIONS */
+        /* ASSETS */
         .die { width: 60px; height: 60px; background: #fff; border: 3px solid #000; border-radius: 5px; display: grid; grid-template-columns: repeat(3, 1fr); padding: 4px; box-shadow: 4px 4px 0 #000; }
         .dot { background: #000; width: 12px; height: 12px; border-radius: 50%; margin: auto; visibility: hidden; }
         .die[v="1"] .dot:nth-child(5){visibility:visible} .die[v="2"] .dot:nth-child(1),.die[v="2"] .dot:nth-child(9){visibility:visible} .die[v="3"] .dot:nth-child(1),.die[v="3"] .dot:nth-child(5),.die[v="3"] .dot:nth-child(9){visibility:visible} .die[v="4"] .dot:nth-child(1),.die[v="4"] .dot:nth-child(3),.die[v="4"] .dot:nth-child(7),.die[v="4"] .dot:nth-child(9){visibility:visible} .die[v="5"] .dot:nth-child(1),.die[v="5"] .dot:nth-child(3),.die[v="5"] .dot:nth-child(5),.die[v="5"] .dot:nth-child(7),.die[v="5"] .dot:nth-child(9){visibility:visible} .die[v="6"] .dot:nth-child(1),.die[v="6"] .dot:nth-child(3),.die[v="6"] .dot:nth-child(4),.die[v="6"] .dot:nth-child(6),.die[v="6"] .dot:nth-child(7),.die[v="6"] .dot:nth-child(9){visibility:visible}
         .coin { width: 80px; height: 80px; border-radius: 50%; background: #feca57; border: 4px solid #fff; display: flex; align-items: center; justify-content: center; font-size: 30px; color: #000; font-weight: bold; transition: transform 0.5s; }
-        .voice-active { border: 2px solid #2ecc71; box-shadow: 0 0 10px #2ecc71; }
+        .hl-card { width: 80px; height: 120px; background: #fff; border: 4px solid #000; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 30px; color: #000; }
+        .wheel { width: 120px; height: 120px; border-radius: 50%; background: conic-gradient(red 0deg 180deg, black 180deg 360deg); border: 4px solid #fff; transition: transform 2s ease-out; }
+        .wheel-marker { position: absolute; top: -10px; border-left: 10px solid transparent; border-right: 10px solid transparent; border-top: 20px solid var(--accent); z-index: 5; }
+        .ttt-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+        .ttt-cell { width: 40px; height: 40px; background: #222; display: flex; align-items: center; justify-content: center; font-size: 20px; border: 1px solid #444; cursor: pointer; color: #fff; }
     </style>
 </head>
 <body>
 
     <div class="credit-bar" id="topCreditDisplay">CREDITS: 0</div>
-    
+
     <div class="modal" id="authModal" style="display:block;">
         <h1 style="color:var(--accent);">DUEL ARENA</h1>
         <input id="uInput" class="input-std" placeholder="USERNAME">
@@ -59,23 +81,28 @@
     <div class="modal-overlay" id="propOverlay"></div>
     <div class="modal" id="proposalModal">
         <h3 style="color:var(--accent);">YOU ARE THE HOST</h3>
-        <p style="font-size:10px;">Propose terms to the challenger.</p>
-        <select id="setGame" class="input-std"><option value="dice">DICE</option><option value="coin">COIN</option></select>
-        <select id="setRounds" class="input-std"><option value="1">1 ROUND</option><option value="3">BEST OF 5</option></select>
-        <input type="number" id="setWager" class="input-std" placeholder="WAGER (TC)" value="0">
+        <p style="font-size:10px;">Propose match terms.</p>
+        <div style="text-align:left;">GAME:<br><select id="setGame" class="input-std"><option value="dice">DICE DUEL</option><option value="coin">COIN FLIP</option><option value="hl">HIGH-LOW</option><option value="roulette">ROULETTE</option><option value="rps">ROCK PAPER SCISSORS</option><option value="ttt">TIC TAC TOE</option></select></div>
+        <div style="text-align:left;">ROUNDS:<br><select id="setRounds" class="input-std"><option value="1">1 (SUDDEN DEATH)</option><option value="3">3 (BEST OF 5)</option><option value="5">5 (RACE TO 5)</option></select></div>
+        <div style="text-align:left;">WAGER:<br><input type="number" id="setWager" class="input-std" value="0"></div>
         <button class="btn btn-green" onclick="submitProposal()">PROPOSE</button>
     </div>
 
     <div class="modal" id="acceptModal">
-        <h3 style="color:var(--accent);">CHALLENGE RECEIVED</h3>
+        <h3 style="color:var(--accent);">CHALLENGE!</h3>
         <p style="font-size:10px;">The host proposes:</p>
         <div id="termDisplay" style="margin:10px; color:#aaa; font-size:12px;"></div>
         <button class="btn btn-green" onclick="respond(true)">ACCEPT MATCH</button>
-        <button class="btn btn-red" onclick="respond(false)">DECLINE & LEAVE</button>
+        <button class="btn btn-red" onclick="respond(false)">DECLINE</button>
     </div>
 
     <div class="main-wrapper">
         <div class="game-section">
+            <div class="top-bar">
+                <h2 style="margin:0; color:var(--accent);">ARENA</h2>
+                <div class="info-txt">GAME: <span id="gDisp">...</span> | GOAL: <span id="rDisp">...</span> | WAGER: <span id="wDisp">0</span></div>
+            </div>
+
             <div class="arena">
                 <div class="player-panel" id="p1Panel">
                     <div class="p-name" id="p1Name">EMPTY</div>
@@ -83,7 +110,7 @@
                     <div class="controls" id="p1Controls"><button class="btn" onclick="reqSeat(1)">SIT P1</button></div>
                 </div>
                 <div class="center-stage">
-                    <div id="status" style="color:#aaa; font-size:10px; padding:10px;">WAITING...</div>
+                    <div class="status-bar" id="status">WAITING FOR PLAYERS...</div>
                     <div class="visuals" id="visuals"><div style="color:#333; font-size:20px;">VS</div></div>
                 </div>
                 <div class="player-panel" id="p2Panel">
@@ -95,115 +122,186 @@
         </div>
 
         <div class="social-sidebar">
+            <div class="panel bet-area">
+                <div style="font-size:8px; color:#666; text-align:center; margin-bottom:5px;">SPECTATOR BET</div>
+                <input class="input-std" placeholder="AMOUNT" id="betAmt">
+                <div style="display:flex; gap:5px;">
+                    <button class="btn" style="background:var(--p1); font-size:8px;" onclick="placeBet(1)">P1</button>
+                    <button class="btn" style="background:var(--p2); font-size:8px;" onclick="placeBet(2)">P2</button>
+                </div>
+            </div>
+
+            <div class="panel chat-box">
+                <div class="panel-head">LIVE CHAT</div>
+                <div class="chat-log custom-scroll" id="chatLog"></div>
+                <input class="chat-input" placeholder="Type..." onkeypress="sendChat(event)">
+            </div>
+
             <div style="background:#1e1e24; padding:10px; border:2px solid #333; text-align:center;">
-                <div style="font-size:10px; color:#aaa;">VOICE CHAT (PUSH TO TALK: SPACE)</div>
-                <div id="voiceStatus" style="font-size:10px; color:#555; margin-top:5px;">DISCONNECTED</div>
+                <div style="font-size:10px; color:#aaa;">VOICE (HOLD SPACE)</div>
+                <div id="voiceStatus" style="font-size:10px; color:#555;">DISCONNECTED</div>
             </div>
         </div>
     </div>
 
 <script>
+    /* --- SECURITY SCRIPT --- */
+    document.addEventListener('contextmenu', event => event.preventDefault());
+    document.addEventListener('keydown', function(e) {
+        if(e.keyCode == 123) { e.preventDefault(); return false; } // F12
+        if(e.ctrlKey && e.shiftKey && e.keyCode == 'I'.charCodeAt(0)) { e.preventDefault(); return false; } // Ctrl+Shift+I
+        if(e.ctrlKey && e.shiftKey && e.keyCode == 'J'.charCodeAt(0)) { e.preventDefault(); return false; } // Ctrl+Shift+J
+        if(e.ctrlKey && e.keyCode == 'U'.charCodeAt(0)) { e.preventDefault(); return false; } // Ctrl+U
+    });
+
     const socket = io();
     let me = null;
     let state = {};
-    
-    // VOICE VARIABLES
     let localStream;
     let peerConnection;
-    const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
     let isTalking = false;
 
-    // 1. AUTH & CREDITS
+    // AUTH
     function auth() {
         const u = document.getElementById('uInput').value;
         const p = document.getElementById('pInput').value;
         if(u && p) socket.emit('auth', { username: u, password: p });
     }
-    socket.on('auth_success', (d) => {
-        me = d.username;
-        document.getElementById('authModal').style.display = 'none';
-        updateCredits(d.balance);
-    });
+    socket.on('auth_success', (d) => { me = d.username; document.getElementById('authModal').style.display = 'none'; updateCredits(d.balance); });
     socket.on('balance_update', (b) => updateCredits(b));
     function updateCredits(b) { document.getElementById('topCreditDisplay').innerText = `CREDITS: ${b}`; }
 
-    // 2. STATE & UI
-    socket.on('state_update', (s) => { state = s; renderUI(); });
-
-    // 3. NEGOTIATION FLOW
+    // NEGOTIATION
     socket.on('prompt_proposal', () => {
         document.getElementById('propOverlay').style.display = 'block';
         document.getElementById('proposalModal').style.display = 'block';
     });
-    
     function submitProposal() {
-        const terms = {
+        socket.emit('propose_terms', {
             game: document.getElementById('setGame').value,
             targetScore: document.getElementById('setRounds').value,
             wager: document.getElementById('setWager').value
-        };
-        socket.emit('propose_terms', terms);
+        });
         document.getElementById('propOverlay').style.display = 'none';
         document.getElementById('proposalModal').style.display = 'none';
-        document.getElementById('status').innerText = "WAITING FOR OPPONENT...";
+        document.getElementById('status').innerText = "OPPONENT REVIEWING...";
     }
-
-    socket.on('wait_for_proposal', () => { document.getElementById('status').innerText = "HOST IS PROPOSING TERMS..."; });
-
-    socket.on('review_terms', (terms) => {
+    socket.on('wait_for_proposal', () => { document.getElementById('status').innerText = "HOST PROPOSING..."; });
+    socket.on('review_terms', (t) => {
         document.getElementById('propOverlay').style.display = 'block';
         document.getElementById('acceptModal').style.display = 'block';
-        document.getElementById('termDisplay').innerHTML = `GAME: ${terms.game.toUpperCase()}<br>ROUNDS: ${terms.targetScore}<br>WAGER: ${terms.wager}`;
+        document.getElementById('termDisplay').innerHTML = `${t.game.toUpperCase()} | ROUNDS: ${t.targetScore} | WAGER: ${t.wager}`;
     });
-
-    function respond(accept) {
-        socket.emit('respond_terms', accept);
+    function respond(ok) {
+        socket.emit('respond_terms', ok);
         document.getElementById('propOverlay').style.display = 'none';
         document.getElementById('acceptModal').style.display = 'none';
     }
+    socket.on('kicked', () => alert("You left the seat."));
 
-    socket.on('kicked_from_seat', () => { alert("You declined and left the seat."); });
-
-    // 4. ANIMATIONS
-    socket.on('anim_dice', (d) => {
-        const h = `<div style="display:flex; gap:10px;">${getDie(d.roll[0])}${getDie(d.roll[1])}${getDie(d.roll[2])}</div>`;
-        document.getElementById('visuals').innerHTML = h;
+    // GAMEPLAY
+    function reqSeat(n) { socket.emit('request_seat', n); }
+    function placeBet(target) {
+        const val = parseInt(document.getElementById('betAmt').value);
+        if(val > 0) socket.emit('place_bet', { amount: val, target });
+    }
+    function sendChat(e) { if(e.key === 'Enter' && e.target.value) { socket.emit('chat_msg', e.target.value); e.target.value = ''; } }
+    
+    socket.on('chat_msg', (d) => {
+        const l = document.getElementById('chatLog');
+        l.innerHTML += `<div style="margin-bottom:5px;"><span style="color:${d.color}">${d.user}:</span> <span style="color:#ccc">${d.text}</span></div>`;
+        l.scrollTop = l.scrollHeight;
+        if(d.user === 'SYSTEM' || d.user === 'REF') document.getElementById('status').innerText = d.text;
     });
-    socket.on('anim_coin', (d) => {
-        const h = `<div class="coin" style="transform: rotateY(720deg);">${d.result}</div>`;
-        document.getElementById('visuals').innerHTML = h;
-    });
 
-    // 5. VOICE CHAT (WebRTC)
+    socket.on('state_update', (s) => { state = s; renderUI(); });
+
+    // VISUALS
+    socket.on('anim_dice', (d) => vis(`<div style="display:flex; gap:10px;">${getDie(d.roll[0])}${getDie(d.roll[1])}${getDie(d.roll[2])}</div>`));
+    socket.on('anim_coin', (d) => vis(`<div class="coin" style="transform: rotateY(720deg);">${d.result}</div>`));
+    socket.on('anim_hl', (d) => vis(`<div style="display:flex; gap:20px;"><div class="hl-card">${d.current}</div><div style="color:#fff; font-size:20px; margin:auto;">▶</div><div class="hl-card" style="border-color:#feca57">${d.next}</div></div>`));
+    socket.on('anim_roulette', (d) => vis(`<div style="position:relative"><div class="wheel-marker" style="left:50%; transform:translateX(-50%)"></div><div class="wheel" style="transform:rotate(${d.angle}deg)"></div></div>`));
+    socket.on('rps_lock', (d) => document.getElementById(`p${d.seat}Panel`).style.borderColor = '#feca57');
+    socket.on('rps_reveal', (d) => { vis(`<div style="font-size:30px; color:#fff;">${d.p1} VS ${d.p2}</div>`); document.getElementById('p1Panel').style.borderColor=''; document.getElementById('p2Panel').style.borderColor=''; });
+    socket.on('anim_ttt', (d) => {
+        let h = `<div class="ttt-grid">`;
+        d.board.forEach((c,i) => h+=`<div class="ttt-cell" onclick="act('ttt', ${i})">${c||''}</div>`);
+        h += `</div>`;
+        vis(h);
+    });
+    socket.on('match_over', (d) => alert(`${d.name} WINS!`));
+
+    function vis(h) { document.getElementById('visuals').innerHTML = h; }
+    function renderUI() {
+        document.getElementById('gDisp').innerText = state.settings.game.toUpperCase();
+        document.getElementById('rDisp').innerText = state.settings.targetScore;
+        document.getElementById('wDisp').innerText = state.settings.wager;
+        document.getElementById('p1Score').innerText = state.scores[1];
+        document.getElementById('p2Score').innerText = state.scores[2];
+        
+        updSeat(1); updSeat(2);
+        
+        document.getElementById('p1Panel').classList.remove('active-turn');
+        document.getElementById('p2Panel').classList.remove('active-turn');
+        if(state.matchActive && state.settings.game !== 'rps') document.getElementById(`p${state.turn}Panel`).classList.add('active-turn');
+
+        document.getElementById('betAmt').disabled = state.bettingLocked;
+        
+        if(state.settings.game === 'ttt' && state.matchActive) {
+            let h = `<div class="ttt-grid">`;
+            state.temp.tttBoard.forEach((c,i) => h+=`<div class="ttt-cell" onclick="act('ttt', ${i})">${c||''}</div>`);
+            h += `</div>`;
+            vis(h);
+        }
+    }
+
+    function updSeat(n) {
+        const p = state.seats[n];
+        document.getElementById(`p${n}Name`).innerText = p || "EMPTY";
+        const div = document.getElementById(`p${n}Controls`);
+        if (p === me) {
+            if (state.matchActive) {
+                div.innerHTML = `<div style="font-size:8px; color:#aaa; text-align:center;">LOCKED</div>`;
+                if (state.turn === n || state.settings.game === 'rps') {
+                    const G = state.settings.game;
+                    if(G=='dice') div.innerHTML+=`<button class="btn btn-green" onclick="act('roll')">ROLL</button>`;
+                    if(G=='coin') div.innerHTML+=`<button class="btn btn-green" onclick="actC('H')">HEADS</button><button class="btn btn-green" onclick="actC('T')">TAILS</button>`;
+                    if(G=='hl') div.innerHTML+=`<button class="btn btn-green" onclick="actC('high')">HI</button><button class="btn btn-green" onclick="actC('low')">LO</button>`;
+                    if(G=='roulette') div.innerHTML+=`<button class="btn btn-green" onclick="actC('RED')">RED</button><button class="btn btn-green" onclick="actC('BLACK')">BLK</button>`;
+                    if(G=='rps') div.innerHTML+=`<div style="display:flex; gap:2px;"><button class="btn" onclick="actC('R')">R</button><button class="btn" onclick="actC('P')">P</button><button class="btn" onclick="actC('S')">S</button></div>`;
+                    if(G=='ttt') div.innerHTML+=`<div style="font-size:8px; text-align:center; color:#fff;">TAP GRID</div>`;
+                }
+            } else div.innerHTML = `<button class="btn btn-red" onclick="socket.emit('leave_seat')">LEAVE</button>`;
+        } else if (!p) div.innerHTML = `<button class="btn" onclick="reqSeat(${n})">SIT</button>`;
+        else div.innerHTML = "TAKEN";
+    }
+
+    function act(action, index) { socket.emit('game_action', { action, index }); }
+    function actC(guess) { socket.emit('game_action', { guess }); }
+    function getDie(v) { return `<div class="die" v="${v}"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`; }
+
+    // VOICE CHAT (WebRTC)
     socket.on('start_voice', async ({ initiator }) => {
-        document.getElementById('voiceStatus').innerText = "CONNECTING VOICE...";
-        
+        document.getElementById('voiceStatus').innerText = "CONNECTING...";
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Mute initially (Push to Talk)
         localStream.getAudioTracks()[0].enabled = false;
-        
-        peerConnection = new RTCPeerConnection(config);
+        peerConnection = new RTCPeerConnection(rtcConfig);
         localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-        peerConnection.onicecandidate = event => {
-            if (event.candidate) socket.emit('voice_signal', { candidate: event.candidate });
-        };
-        
+        peerConnection.onicecandidate = event => { if (event.candidate) socket.emit('voice_signal', { candidate: event.candidate }); };
         peerConnection.ontrack = event => {
             const remoteAudio = new Audio();
             remoteAudio.srcObject = event.streams[0];
             remoteAudio.play();
-            document.getElementById('voiceStatus').innerText = "VOICE CONNECTED (HOLD SPACE)";
+            document.getElementById('voiceStatus').innerText = "CONNECTED (SPACE TO TALK)";
             document.getElementById('voiceStatus').style.color = "#2ecc71";
         };
-
         if (initiator) {
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
             socket.emit('voice_signal', { sdp: offer });
         }
     });
-
     socket.on('voice_signal', async (data) => {
         if (!peerConnection) return;
         if (data.sdp) {
@@ -213,65 +311,11 @@
                 await peerConnection.setLocalDescription(answer);
                 socket.emit('voice_signal', { sdp: answer });
             }
-        } else if (data.candidate) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-        }
+        } else if (data.candidate) await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
     });
+    document.addEventListener('keydown', (e) => { if (e.code === 'Space' && localStream) { localStream.getAudioTracks()[0].enabled = true; document.getElementById('voiceStatus').innerText = "MIC ON"; } });
+    document.addEventListener('keyup', (e) => { if (e.code === 'Space' && localStream) { localStream.getAudioTracks()[0].enabled = false; document.getElementById('voiceStatus').innerText = "CONNECTED (SPACE TO TALK)"; } });
 
-    // PUSH TO TALK
-    document.addEventListener('keydown', (e) => {
-        if (e.code === 'Space' && localStream) {
-            if(!isTalking) {
-                localStream.getAudioTracks()[0].enabled = true;
-                isTalking = true;
-                document.getElementById('voiceStatus').innerText = "MIC ACTIVE";
-            }
-        }
-    });
-    
-    document.addEventListener('keyup', (e) => {
-        if (e.code === 'Space' && localStream) {
-            localStream.getAudioTracks()[0].enabled = false;
-            isTalking = false;
-            document.getElementById('voiceStatus').innerText = "VOICE CONNECTED (HOLD SPACE)";
-        }
-    });
-
-    // HELPERS
-    function reqSeat(n) { socket.emit('request_seat', n); }
-    function act(action) { socket.emit('game_action', { action }); } // simplified for brevity
-    function getDie(v) { return `<div class="die" v="${v}"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`; }
-    
-    function renderUI() {
-        updateSeat(1); updateSeat(2);
-        document.getElementById('p1Score').innerText = state.scores[1];
-        document.getElementById('p2Score').innerText = state.scores[2];
-        
-        document.getElementById('p1Panel').classList.remove('active-turn');
-        document.getElementById('p2Panel').classList.remove('active-turn');
-        if(state.matchActive) document.getElementById(`p${state.turn}Panel`).classList.add('active-turn');
-    }
-
-    function updateSeat(n) {
-        const p = state.seats[n];
-        document.getElementById(`p${n}Name`).innerText = p || "EMPTY";
-        const div = document.getElementById(`p${n}Controls`);
-        
-        if (p === me) {
-            if (state.matchActive && state.turn === n) {
-                // Simplified controls for Dice (expand for others)
-                div.innerHTML = `<button class="btn btn-green" onclick="socket.emit('game_action', {})">PLAY</button>`;
-            } else if (state.matchActive) {
-                div.innerHTML = "LOCKED";
-            } else {
-                div.innerHTML = `<button class="btn btn-red" onclick="socket.emit('leave_seat')">LEAVE</button>`;
-            }
-        } else if (!p) {
-            div.innerHTML = `<button class="btn" onclick="reqSeat(${n})">SIT</button>`;
-        } else {
-            div.innerHTML = "TAKEN";
-        }
-    }
 </script>
 </body>
 </html>
