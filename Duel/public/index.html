@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CASINO DUEL ARENA</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        /* PASTE YOUR ORIGINAL CSS HERE */
+        /* I will include the critical CSS for the login modal below */
+        :root { --bg-dark: #121216; --bg-panel: #1e1e24; --p1-color: #ff4757; --p2-color: #2e86de; --accent: #feca57; --text: #ffffff; --grid-line: rgba(255, 255, 255, 0.05); --sidebar-width: 340px; --betting-height: 265px; --players-height: 320px; }
+        * { box-sizing: border-box; }
+        body { background-color: var(--bg-dark); background-image: linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px); background-size: 20px 20px; color: var(--text); font-family: 'Press Start 2P', cursive; margin: 0; padding: 0; height: 100vh; width: 100vw; overflow: hidden; display: flex; }
+        .custom-scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: transparent transparent; }
+        .custom-scroll:hover { scrollbar-color: #555 transparent; }
+        
+        /* LAYOUT CLASSES (From your file) */
+        .main-wrapper { display: flex; width: 100%; height: 100%; padding: 20px; gap: 20px; overflow: hidden; height: 100vh; }
+        .game-section { flex-grow: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden; min-width: 0; }
+        .social-sidebar { width: var(--sidebar-width); min-width: var(--sidebar-width); display: flex; flex-direction: column; gap: 15px; height: 100%; overflow: hidden; }
+        
+        /* ... (Include the rest of your CSS for the game board here) ... */
+        .arena-container { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 25px; flex-grow: 1; min-height: 0; padding: 10px; overflow: hidden; }
+        .player-hud { background: var(--bg-panel); border: 4px solid #000; display: flex; flex-direction: column; position: relative; box-shadow: 4px 4px 0 #000; height: 100%; }
+        .center-stage { background: #000; border: 4px solid #333; display: flex; flex-direction: column; position: relative; height: 100%; }
+        .game-board { flex-grow: 1; display: flex; align-items: center; justify-content: center; padding: 20px; position: relative; overflow: hidden; }
+        .vs-badge { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 60px; font-weight: 900; color: rgba(255, 255, 255, 0.03); font-family: 'Rajdhani', sans-serif; pointer-events: none; }
+        
+        /* CHAT CSS REPAIR */
+        .chat-container-box { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: var(--bg-panel); border: 4px solid #000; }
+        .chat-inner { flex-grow: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        .chat-log { flex-grow: 1; padding: 15px; font-size: 14px; line-height: 1.5; color: #ccc; font-family: 'Rajdhani', sans-serif; font-weight: 600; overflow-y: auto; }
+        .chat-msg { margin-bottom: 8px; word-wrap: break-word; }
+        .chat-input-area { display: flex; border-top: 4px solid #000; flex-shrink: 0; }
+        .chat-input { flex-grow: 1; background: #000; border: none; color: #fff; padding: 15px; font-family: 'Press Start 2P'; font-size: 12px; outline: none; height: 50px; }
+
+        /* --- LOGIN MODAL CSS --- */
+        #loginOverlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95); z-index: 9999;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .login-box {
+            background: #1e1e24; border: 4px solid #feca57; padding: 40px;
+            width: 400px; text-align: center; box-shadow: 0 0 50px rgba(254, 202, 87, 0.2);
+        }
+        .login-input {
+            width: 100%; padding: 15px; margin-bottom: 15px;
+            background: #000; border: 2px solid #555; color: #fff;
+            font-family: 'Press Start 2P'; font-size: 12px;
+        }
+        .login-btn {
+            width: 100%; padding: 15px; background: #feca57; color: #000;
+            border: none; font-family: 'Press Start 2P'; cursor: pointer;
+            font-size: 14px; text-transform: uppercase;
+        }
+        .login-btn:hover { background: #fff; }
+    </style>
+</head>
+<body>
+
+    <div id="loginOverlay">
+        <div class="login-box">
+            <h1 style="color: #feca57; margin-bottom: 30px;">DUEL ARENA</h1>
+            <input type="text" id="usernameInput" class="login-input" placeholder="USERNAME">
+            <input type="password" id="passwordInput" class="login-input" placeholder="PASSWORD">
+            <button class="login-btn" onclick="attemptLogin()">ENTER WORLD</button>
+            <div id="loginError" style="color: #ff4757; font-size: 10px; margin-top: 15px;"></div>
+        </div>
+    </div>
+
+    <div class="main-wrapper">
+        <div class="game-section">
+            <div class="arena-container">
+                <div class="player-hud p1-hud" id="p1Panel">
+                    <div style="padding:10px; text-align:center; background:#333;" id="p1Name">EMPTY SEAT</div>
+                    <div class="game-board" style="align-items:center; justify-content:center; display:flex;">
+                         <div style="font-size:40px; color:#333;">P1</div>
+                    </div>
+                    <div style="padding:15px;"><button onclick="sit(1)" style="width:100%; padding:10px;">SIT HERE</button></div>
+                </div>
+
+                <div class="center-stage">
+                    <div style="padding:10px; text-align:center; border-bottom:2px solid #333;">ARENA</div>
+                    <div class="game-board" id="gameVisuals">
+                        <div class="vs-badge">VS</div>
+                    </div>
+                </div>
+
+                <div class="player-hud p2-hud" id="p2Panel">
+                    <div style="padding:10px; text-align:center; background:#333;" id="p2Name">EMPTY SEAT</div>
+                    <div class="game-board" style="align-items:center; justify-content:center; display:flex;">
+                         <div style="font-size:40px; color:#333;">P2</div>
+                    </div>
+                    <div style="padding:15px;"><button onclick="sit(2)" style="width:100%; padding:10px;">SIT HERE</button></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="social-sidebar">
+            <div class="chat-container-box">
+                <div style="padding:10px; background:#2f3640; color:#fff; font-size:10px;">LIVE CHAT</div>
+                <div class="chat-inner">
+                    <div class="chat-log custom-scroll" id="chatLog">
+                        </div>
+                    <div class="chat-input-area">
+                        <input type="text" class="chat-input" id="chatMsgInput" placeholder="Type here..." onkeypress="handleChatKey(event)">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const socket = io();
+    let myUsername = "";
+
+    // --- LOGIN SYSTEM ---
+    function attemptLogin() {
+        const u = document.getElementById('usernameInput').value;
+        const p = document.getElementById('passwordInput').value;
+        if(!u || !p) return;
+        socket.emit('login', { username: u, password: p });
+    }
+
+    socket.on('login_fail', (msg) => {
+        document.getElementById('loginError').innerText = msg;
+    });
+
+    socket.on('login_success', (data) => {
+        myUsername = data.username;
+        document.getElementById('loginOverlay').style.display = 'none';
+    });
+
+    // --- CHAT SYSTEM ---
+    function handleChatKey(e) {
+        if(e.key === 'Enter') {
+            const input = document.getElementById('chatMsgInput');
+            const txt = input.value;
+            if(txt.trim()) {
+                socket.emit('send_chat', txt);
+                input.value = '';
+            }
+        }
+    }
+
+    socket.on('chat_message', (data) => {
+        const log = document.getElementById('chatLog');
+        const div = document.createElement('div');
+        div.className = 'chat-msg';
+        div.innerHTML = `<span class="chat-user" style="color:${data.color}">${data.user}:</span> <span class="chat-text">${data.text}</span>`;
+        log.appendChild(div);
+        log.scrollTop = log.scrollHeight;
+    });
+
+    // --- GAME SYNC (Basic Example) ---
+    function sit(seatNum) {
+        socket.emit('take_seat', seatNum);
+    }
+
+    socket.on('update_seat', (data) => {
+        if(data.seat === 1) document.getElementById('p1Name').innerText = data.user;
+        if(data.seat === 2) document.getElementById('p2Name').innerText = data.user;
+    });
+
+    // You can add the specific Game Logic listeners here (dice roll, etc.)
+    // mapping them to the 'game_event' socket listener
+    socket.on('game_event', (data) => {
+        console.log("Game Event:", data);
+        // If data.type == 'dice', run the dice animation function
+    });
+</script>
+</body>
+</html>
