@@ -3,174 +3,375 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CASINO DUEL ARENA</title>
+    <title>CASINO DUEL ARENA - LIVE</title>
     <script src="/socket.io/socket.io.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        /* PASTE YOUR ORIGINAL CSS HERE */
-        /* I will include the critical CSS for the login modal below */
-        :root { --bg-dark: #121216; --bg-panel: #1e1e24; --p1-color: #ff4757; --p2-color: #2e86de; --accent: #feca57; --text: #ffffff; --grid-line: rgba(255, 255, 255, 0.05); --sidebar-width: 340px; --betting-height: 265px; --players-height: 320px; }
+        :root {
+            --bg-dark: #121216; --bg-panel: #1e1e24; --p1-color: #ff4757; --p2-color: #2e86de; 
+            --accent: #feca57; --text: #ffffff; --grid-line: rgba(255, 255, 255, 0.05); 
+            --sidebar-width: 340px; --betting-height: 265px; --players-height: 320px;
+        }
+
         * { box-sizing: border-box; }
-        body { background-color: var(--bg-dark); background-image: linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px); background-size: 20px 20px; color: var(--text); font-family: 'Press Start 2P', cursive; margin: 0; padding: 0; height: 100vh; width: 100vw; overflow: hidden; display: flex; }
-        .custom-scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: transparent transparent; }
+
+        body {
+            background-color: var(--bg-dark);
+            background-image: 
+                linear-gradient(var(--grid-line) 1px, transparent 1px),
+                linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+            background-size: 20px 20px; color: var(--text); font-family: 'Press Start 2P', cursive;
+            margin: 0; padding: 0; height: 100vh; width: 100vw; overflow: hidden; display: flex;
+        }
+
+        /* --- HOVER SCROLLBARS --- */
+        .custom-scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: transparent transparent; transition: scrollbar-color 0.3s; }
         .custom-scroll:hover { scrollbar-color: #555 transparent; }
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background-color: transparent; border-radius: 3px; }
+        .custom-scroll:hover::-webkit-scrollbar-thumb { background-color: #555; }
+
+        /* --- MAIN LAYOUT --- */
+        .main-wrapper { display: flex; width: 100%; height: 100%; padding: 20px; gap: 20px; overflow: hidden; height: 100vh; min-height: 0; }
+        .game-section { flex-grow: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden; min-width: 0; flex: 1 1 auto; min-height: 0; }
+        .social-sidebar { width: var(--sidebar-width); min-width: var(--sidebar-width); display: flex; flex-direction: column; gap: 15px; height: 100%; overflow: hidden; flex: 0 0 var(--sidebar-width); min-height: 0; }
+
+        /* --- TOP BAR --- */
+        .top-bar { width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 4px solid #333; padding-bottom: 15px; flex-shrink: 0; }
+        h1 { color: var(--accent); font-size: 20px; text-shadow: 3px 3px 0 #000; margin: 0; }
+        .settings-group { display: flex; gap: 10px; align-items: center; }
+        select { background: #000; color: #fff; border: 2px solid #555; padding: 10px; font-family: 'Press Start 2P'; font-size: 10px; cursor: pointer; text-transform: uppercase; }
+        select:hover { border-color: var(--accent); }
+        .reset-btn { background: #ff4757; color: #fff; border: 2px solid #000; padding: 10px 15px; font-size: 10px; font-family: 'Press Start 2P'; cursor: pointer; box-shadow: 3px 3px 0 #000; }
+        .reset-btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #000; }
+        .target-display { background: #333; color: #aaa; padding: 10px; font-size: 10px; border: 2px solid #555; }
+
+        /* --- GAME TABS --- */
+        .game-selector { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px; background: #000; padding: 10px; border: 2px solid #333; border-radius: 8px; flex-shrink: 0; }
+        .game-tab { background: #333; border: 2px solid #555; color: #aaa; padding: 10px 15px; font-size: 10px; font-family: 'Press Start 2P'; cursor: pointer; transition: all 0.2s; position: relative; top: 0; }
+        .game-tab:hover { background: #444; color: #fff; top: -2px; }
+        .game-tab.active { background: var(--accent); color: #000; border-color: #fff; box-shadow: 0 0 10px var(--accent); z-index: 2; }
+        .game-tab.disabled { opacity: 0.3; pointer-events: none; filter: grayscale(1); }
+
+        /* --- ARENA --- */
+        .arena-container { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 25px; align-items: stretch; flex-grow: 1; min-height: 0; padding: 10px; overflow: hidden; }
+        .player-hud { background: var(--bg-panel); border: 4px solid #000; display: flex; flex-direction: column; position: relative; box-shadow: 4px 4px 0 #000; transition: all 0.3s ease; height: 100%; z-index: 1; }
+        .player-header { padding: 10px; text-align: center; border-bottom: 4px solid #000; position: relative; transition: background 0.3s; font-size: 12px; height: 40px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;}
+        .p1-hud { border-color: #555; } .p1-hud .player-header { background: #333; color: #fff; }
+        .p1-hud.active-turn { border-color: var(--p1-color); box-shadow: 0 0 20px var(--p1-color); z-index: 10; transform: scale(1.02); }
+        .p1-hud.active-turn .player-header { background: var(--p1-color); }
+        .p2-hud { border-color: #555; } .p2-hud .player-header { background: #333; color: #fff; }
+        .p2-hud.active-turn { border-color: var(--p2-color); box-shadow: 0 0 20px var(--p2-color); z-index: 10; transform: scale(1.02); }
+        .p2-hud.active-turn .player-header { background: var(--p2-color); }
         
-        /* LAYOUT CLASSES (From your file) */
-        .main-wrapper { display: flex; width: 100%; height: 100%; padding: 20px; gap: 20px; overflow: hidden; height: 100vh; }
-        .game-section { flex-grow: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden; min-width: 0; }
-        .social-sidebar { width: var(--sidebar-width); min-width: var(--sidebar-width); display: flex; flex-direction: column; gap: 15px; height: 100%; overflow: hidden; }
+        .score-area { display: flex; flex-direction: column; align-items: center; justify-content: center; flex-grow: 1; min-height: 0; }
+        .score-display { font-size: 60px; font-family: 'Rajdhani', sans-serif; font-weight: 700; }
+        .match-point { font-size: 10px; color: var(--accent); margin-top: 5px; display: none; }
         
-        /* ... (Include the rest of your CSS for the game board here) ... */
-        .arena-container { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 25px; flex-grow: 1; min-height: 0; padding: 10px; overflow: hidden; }
-        .player-hud { background: var(--bg-panel); border: 4px solid #000; display: flex; flex-direction: column; position: relative; box-shadow: 4px 4px 0 #000; height: 100%; }
-        .center-stage { background: #000; border: 4px solid #333; display: flex; flex-direction: column; position: relative; height: 100%; }
-        .game-board { flex-grow: 1; display: flex; align-items: center; justify-content: center; padding: 20px; position: relative; overflow: hidden; }
-        .vs-badge { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 60px; font-weight: 900; color: rgba(255, 255, 255, 0.03); font-family: 'Rajdhani', sans-serif; pointer-events: none; }
-        
-        /* CHAT CSS REPAIR */
-        .chat-container-box { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: var(--bg-panel); border: 4px solid #000; }
-        .chat-inner { flex-grow: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        .controls-area { padding: 15px; flex-grow: 0; display: flex; flex-direction: column; gap: 10px; justify-content: center; min-height: 120px; background: rgba(0,0,0,0.2); flex-shrink: 0; }
+        .arcade-btn { position: relative; display: block; width: 100%; padding: 12px 5px; font-family: 'Press Start 2P'; font-size: 10px; text-transform: uppercase; border: none; cursor: pointer; background: none; margin-bottom: 5px; }
+        .arcade-btn::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #444; border: 3px solid #000; box-shadow: inset 2px 2px 0 rgba(255,255,255,0.2), 4px 4px 0 #000; z-index: -1; transition: all 0.1s; }
+        .p1-btn::before { background: var(--p1-color); } .p2-btn::before { background: var(--p2-color); }
+        .arcade-btn:active::before { transform: translate(3px, 3px); box-shadow: inset 2px 2px 0 rgba(0,0,0,0.2), 1px 1px 0 #000; }
+        .arcade-btn:disabled { cursor: not-allowed; filter: grayscale(100%); opacity: 0.3; pointer-events: none; }
+
+        .seat-btn { width: 100%; padding: 20px; background: #333; color: #aaa; border: 2px dashed #666; font-family: 'Press Start 2P'; cursor: pointer; font-size: 10px; text-transform: uppercase; margin-top: auto; margin-bottom: auto; transition: all 0.2s; }
+        .seat-btn:hover:not(:disabled) { color: #fff; border-color: #fff; background: #444; transform: scale(1.05); }
+        .seat-btn:disabled { cursor: not-allowed; opacity: 0.5; }
+
+        .center-stage { background: #000; border: 4px solid #333; display: flex; flex-direction: column; position: relative; box-shadow: inset 0 0 20px rgba(0,0,0,0.8); height: 100%; }
+        .round-tracker { background: #222; color: #fff; text-align: center; padding: 8px; font-size: 12px; border-bottom: 2px solid #444; letter-spacing: 2px; text-shadow: 2px 2px 0 #000; flex-shrink: 0;}
+        .marquee-status { background: #111; border-bottom: 2px solid #444; color: #888; text-align: center; padding: 10px; font-size: 10px; min-height: 35px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;}
+        .game-board { flex-grow: 1; display: flex; align-items: center; justify-content: center; padding: 20px; position: relative; overflow: hidden; perspective: 1000px; min-height: 0;}
+        .vs-badge { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 60px; font-weight: 900; color: rgba(255, 255, 255, 0.03); font-family: 'Rajdhani', sans-serif; pointer-events: none; z-index: 0; }
+
+        /* --- SIDEBAR PANELS --- */
+        .sidebar-panel { background: var(--bg-panel); border: 4px solid #000; display: flex; flex-direction: column; min-height: 0; overflow: hidden; box-shadow: 4px 4px 0 #000; flex-shrink: 0; }
+        .panel-header { background: #2f3640; color: #fff; padding: 8px; text-align: left; padding-left: 15px; font-size: 10px; border-bottom: 4px solid #000; text-transform: uppercase; font-weight: bold; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+
+        /* 1. BETTING */
+        .betting-panel { padding: 15px; border-bottom: 4px solid #000; background: #191919; }
+        .betting-overlay { position: absolute; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.85); z-index: 10; display: flex; align-items: center; justify-content: center; color: #aaa; font-size: 10px; text-align: center; padding: 20px; font-family: 'Press Start 2P'; line-height: 1.5; }
+        .betting-wrapper { position: relative; height: var(--betting-height); flex: 0 0 var(--betting-height); }
+        .wallet { text-align: center; color: var(--accent); margin-bottom: 10px; font-size: 10px; }
+        .bet-label { font-size: 8px; color: #666; margin-bottom: 5px; text-align: center; text-transform: uppercase; }
+        .bet-controls { display: flex; gap: 5px; margin-bottom: 10px; }
+        .bet-btn { flex: 1; font-size: 8px; padding: 12px 5px; border: 2px solid #333; background: #222; color: #888; cursor: pointer; font-family: 'Press Start 2P'; transition: all 0.1s; }
+        .bet-btn.selected { border-color: #fff; color: #000; box-shadow: 0 0 10px rgba(255,255,255,0.2); }
+        .bet-btn.p1-btn.selected { background: var(--p1-color); } .bet-btn.p2-btn.selected { background: var(--p2-color); }
+        .bet-input { width: 100%; background: #000; border: 2px solid #555; color: #fff; padding: 15px 10px; font-family: 'Press Start 2P'; font-size: 10px; text-align: center; margin-bottom: 5px; height: 45px; }
+        .place-bet-btn { width: 100%; background: #2ecc71; color: #000; border: 2px solid #000; padding: 12px; font-family: 'Press Start 2P'; cursor: pointer; font-size: 10px; margin-top: 5px; }
+
+        /* 3. CHAT */
+        .chat-container-box { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; margin-bottom: 0; }
+        .chat-inner { flex-grow: 1; display: flex; flex-direction: column; background: #1e1e24; min-height: 0; overflow: hidden; }
         .chat-log { flex-grow: 1; padding: 15px; font-size: 14px; line-height: 1.5; color: #ccc; font-family: 'Rajdhani', sans-serif; font-weight: 600; overflow-y: auto; }
         .chat-msg { margin-bottom: 8px; word-wrap: break-word; }
+        .chat-user { font-weight: 800; margin-right: 5px; }
+        .chat-text { color: #eee; }
         .chat-input-area { display: flex; border-top: 4px solid #000; flex-shrink: 0; }
         .chat-input { flex-grow: 1; background: #000; border: none; color: #fff; padding: 15px; font-family: 'Press Start 2P'; font-size: 12px; outline: none; height: 50px; }
 
-        /* --- LOGIN MODAL CSS --- */
+        /* --- LOGIN MODAL (ARCADE THEME) --- */
         #loginOverlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.95); z-index: 9999;
             display: flex; align-items: center; justify-content: center;
+            background-image: linear-gradient(rgba(0,0,0,0.3) 1px, transparent 1px);
+            background-size: 100% 4px; /* Scanline effect */
         }
         .login-box {
-            background: #1e1e24; border: 4px solid #feca57; padding: 40px;
-            width: 400px; text-align: center; box-shadow: 0 0 50px rgba(254, 202, 87, 0.2);
+            background: #111; border: 6px solid var(--accent); padding: 40px;
+            width: 450px; text-align: center; box-shadow: 0 0 30px var(--accent), inset 0 0 20px #000;
         }
+        .login-title { color: var(--accent); font-size: 24px; text-shadow: 4px 4px 0 #000; margin-bottom: 10px; }
+        .login-subtitle { font-size: 10px; color: #aaa; margin-bottom: 30px; letter-spacing: 1px; }
         .login-input {
-            width: 100%; padding: 15px; margin-bottom: 15px;
-            background: #000; border: 2px solid #555; color: #fff;
-            font-family: 'Press Start 2P'; font-size: 12px;
+            width: 100%; padding: 15px; margin-bottom: 15px; text-align: center;
+            background: #000; border: 2px solid #444; color: #fff;
+            font-family: 'Press Start 2P'; font-size: 12px; transition: border 0.3s;
         }
-        .login-btn {
-            width: 100%; padding: 15px; background: #feca57; color: #000;
-            border: none; font-family: 'Press Start 2P'; cursor: pointer;
-            font-size: 14px; text-transform: uppercase;
+        .login-input:focus { border-color: var(--p2-color); outline: none; }
+        .login-submit {
+            width: 100%; padding: 15px; background: var(--p1-color); color: #fff;
+            border: 4px solid #000; font-family: 'Press Start 2P'; cursor: pointer;
+            font-size: 14px; text-transform: uppercase; box-shadow: 4px 4px 0 #000; margin-top: 10px;
         }
-        .login-btn:hover { background: #fff; }
+        .login-submit:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 #000; }
+        
+        /* Game Asset Placeholders (Simplified for snippet length) */
+        .dice-row { display: flex; gap: 10px; z-index: 1; }
+        .die { width: 70px; height: 70px; background: #fff; border: 4px solid #000; border-radius: 8px; display: grid; grid-template-columns: repeat(3, 1fr); padding: 5px; box-shadow: 4px 4px 0 rgba(0,0,0,0.5); }
     </style>
 </head>
 <body>
 
-    <div id="loginOverlay">
-        <div class="login-box">
-            <h1 style="color: #feca57; margin-bottom: 30px;">DUEL ARENA</h1>
-            <input type="text" id="usernameInput" class="login-input" placeholder="USERNAME">
-            <input type="password" id="passwordInput" class="login-input" placeholder="PASSWORD">
-            <button class="login-btn" onclick="attemptLogin()">ENTER WORLD</button>
-            <div id="loginError" style="color: #ff4757; font-size: 10px; margin-top: 15px;"></div>
-        </div>
+<div id="loginOverlay">
+    <div class="login-box">
+        <div class="login-title">INSERT COIN</div>
+        <div class="login-subtitle">ENTER CREDENTIALS OR CREATE NEW</div>
+        <input type="text" id="usernameInput" class="login-input" placeholder="USERNAME" autocomplete="off">
+        <input type="password" id="passwordInput" class="login-input" placeholder="PASSWORD">
+        <button class="login-submit" onclick="attemptLogin()">PRESS START</button>
+        <div id="loginError" style="color: var(--p1-color); font-size: 10px; margin-top: 20px;"></div>
     </div>
+</div>
 
-    <div class="main-wrapper">
-        <div class="game-section">
-            <div class="arena-container">
-                <div class="player-hud p1-hud" id="p1Panel">
-                    <div style="padding:10px; text-align:center; background:#333;" id="p1Name">EMPTY SEAT</div>
-                    <div class="game-board" style="align-items:center; justify-content:center; display:flex;">
-                         <div style="font-size:40px; color:#333;">P1</div>
-                    </div>
-                    <div style="padding:15px;"><button onclick="sit(1)" style="width:100%; padding:10px;">SIT HERE</button></div>
-                </div>
-
-                <div class="center-stage">
-                    <div style="padding:10px; text-align:center; border-bottom:2px solid #333;">ARENA</div>
-                    <div class="game-board" id="gameVisuals">
-                        <div class="vs-badge">VS</div>
-                    </div>
-                </div>
-
-                <div class="player-hud p2-hud" id="p2Panel">
-                    <div style="padding:10px; text-align:center; background:#333;" id="p2Name">EMPTY SEAT</div>
-                    <div class="game-board" style="align-items:center; justify-content:center; display:flex;">
-                         <div style="font-size:40px; color:#333;">P2</div>
-                    </div>
-                    <div style="padding:15px;"><button onclick="sit(2)" style="width:100%; padding:10px;">SIT HERE</button></div>
-                </div>
+<div class="main-wrapper">
+    <div class="game-section">
+        <div class="top-bar">
+            <h1>CASINO ARENA</h1>
+            <div class="settings-group">
+                <div class="target-display" id="targetDisplay">TARGET: 1</div>
+                <button onclick="resetMatch()" class="reset-btn" id="resetMatchBtn" disabled>RESET</button>
             </div>
         </div>
 
-        <div class="social-sidebar">
-            <div class="chat-container-box">
-                <div style="padding:10px; background:#2f3640; color:#fff; font-size:10px;">LIVE CHAT</div>
-                <div class="chat-inner">
-                    <div class="chat-log custom-scroll" id="chatLog">
-                        </div>
-                    <div class="chat-input-area">
-                        <input type="text" class="chat-input" id="chatMsgInput" placeholder="Type here..." onkeypress="handleChatKey(event)">
-                    </div>
+        <div class="game-selector">
+            <button onclick="setGame('dice')" class="game-tab active" id="tab-dice">DICE</button>
+        </div>
+
+        <div class="arena-container">
+            <div class="player-hud p1-hud" id="p1Panel">
+                <div class="player-header"><div id="p1Name">EMPTY</div></div>
+                <div class="score-area"><div class="score-display" id="p1Score">0</div></div>
+                <div class="controls-area" id="p1Controls">
+                    <button class="seat-btn" id="seat1Btn" onclick="requestSeat(1)">TAKE SEAT 1</button>
+                </div>
+            </div>
+
+            <div class="center-stage">
+                <div class="round-tracker" id="roundTracker">ROUND <span>1</span></div>
+                <div class="marquee-status" id="status">WAITING FOR PLAYERS...</div>
+                <div class="game-board" id="gameVisuals"><div class="vs-badge">VS</div></div>
+            </div>
+
+            <div class="player-hud p2-hud" id="p2Panel">
+                <div class="player-header"><div id="p2Name">EMPTY</div></div>
+                <div class="score-area"><div class="score-display" id="p2Score">0</div></div>
+                <div class="controls-area" id="p2Controls">
+                    <button class="seat-btn" id="seat2Btn" onclick="requestSeat(2)">TAKE SEAT 2</button>
                 </div>
             </div>
         </div>
     </div>
+
+    <div class="social-sidebar">
+        <div class="sidebar-panel betting-wrapper">
+            <div class="panel-header">SPECTATOR BETTING</div>
+            <div class="betting-panel">
+                <div class="wallet" id="walletDisplay">WALLET: 0 TC</div>
+                <div class="bet-label">STEP 1: CHOOSE FIGHTER</div>
+                <div class="bet-controls">
+                    <button class="bet-btn p1-btn" onclick="selectBet(1)" id="betP1Btn">BET P1</button>
+                    <button class="bet-btn p2-btn" onclick="selectBet(2)" id="betP2Btn">BET P2</button>
+                </div>
+                <div class="bet-label" style="margin-top:10px;">STEP 2: WAGER</div>
+                <input type="number" id="betAmount" class="bet-input" placeholder="AMOUNT" min="10" max="1000">
+                <button class="place-bet-btn" id="placeBetBtn" onclick="placeSpectatorBet()">PLACE BET</button>
+            </div>
+            <div class="betting-overlay" id="betOverlay">WAITING FOR<br>2 PLAYERS...</div>
+        </div>
+
+        <div class="sidebar-panel chat-container-box">
+            <div class="panel-header">LIVE CHAT</div>
+            <div class="chat-inner">
+                <div class="chat-log custom-scroll" id="chatLog"></div>
+                <div class="chat-input-area">
+                    <input type="text" class="chat-input" id="chatMsgInput" placeholder="Type here..." onkeypress="handleChatKey(event)">
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <script>
     const socket = io();
-    let myUsername = "";
+    
+    // --- GLOBAL STATE ---
+    const state = { 
+        username: null, 
+        balance: 0,
+        mySeat: null, // Can be 1, 2, or null (Spectator)
+        seats: { 1: null, 2: null }, // Stores usernames of seated players
+        isGameRunning: false 
+    };
 
-    // --- LOGIN SYSTEM ---
+    // --- DOM ELEMENTS ---
+    const DOM = {
+        loginOverlay: document.getElementById('loginOverlay'),
+        loginError: document.getElementById('loginError'),
+        chatLog: document.getElementById('chatLog'),
+        chatInput: document.getElementById('chatMsgInput'),
+        p1Name: document.getElementById('p1Name'),
+        p2Name: document.getElementById('p2Name'),
+        seat1Btn: document.getElementById('seat1Btn'),
+        seat2Btn: document.getElementById('seat2Btn'),
+        betOverlay: document.getElementById('betOverlay'),
+        wallet: document.getElementById('walletDisplay'),
+        status: document.getElementById('status')
+    };
+
+    // --- LOGIN / AUTHENTICATION ---
     function attemptLogin() {
-        const u = document.getElementById('usernameInput').value;
-        const p = document.getElementById('passwordInput').value;
-        if(!u || !p) return;
+        const u = document.getElementById('usernameInput').value.trim();
+        const p = document.getElementById('passwordInput').value.trim();
+        if(!u || !p) { DOM.loginError.innerText = "FILL ALL FIELDS"; return; }
+        
+        DOM.loginError.innerText = "CONNECTING...";
         socket.emit('login', { username: u, password: p });
     }
 
     socket.on('login_fail', (msg) => {
-        document.getElementById('loginError').innerText = msg;
+        DOM.loginError.innerText = msg;
     });
 
     socket.on('login_success', (data) => {
-        myUsername = data.username;
-        document.getElementById('loginOverlay').style.display = 'none';
+        state.username = data.username;
+        state.balance = data.balance;
+        DOM.wallet.innerText = `WALLET: ${state.balance} TC`;
+        DOM.loginOverlay.style.display = 'none';
+        
+        // Request current seat status on login
+        socket.emit('request_seat_status');
     });
 
-    // --- CHAT SYSTEM ---
+    // --- REAL-TIME CHAT ---
     function handleChatKey(e) {
         if(e.key === 'Enter') {
-            const input = document.getElementById('chatMsgInput');
-            const txt = input.value;
-            if(txt.trim()) {
+            const txt = DOM.chatInput.value.trim();
+            if(txt) {
                 socket.emit('send_chat', txt);
-                input.value = '';
+                DOM.chatInput.value = '';
             }
         }
     }
 
     socket.on('chat_message', (data) => {
-        const log = document.getElementById('chatLog');
         const div = document.createElement('div');
         div.className = 'chat-msg';
         div.innerHTML = `<span class="chat-user" style="color:${data.color}">${data.user}:</span> <span class="chat-text">${data.text}</span>`;
-        log.appendChild(div);
-        log.scrollTop = log.scrollHeight;
+        DOM.chatLog.appendChild(div);
+        DOM.chatLog.scrollTop = DOM.chatLog.scrollHeight;
     });
 
-    // --- GAME SYNC (Basic Example) ---
-    function sit(seatNum) {
+    // --- SEATING & MULTIPLAYER LOGIC ---
+    function requestSeat(seatNum) {
+        if (state.mySeat !== null) {
+            alert("You are already seated!");
+            return;
+        }
         socket.emit('take_seat', seatNum);
     }
 
+    // Server tells clients who is sitting where
     socket.on('update_seat', (data) => {
-        if(data.seat === 1) document.getElementById('p1Name').innerText = data.user;
-        if(data.seat === 2) document.getElementById('p2Name').innerText = data.user;
+        // data looks like { seat: 1, user: "PlayerName" }
+        state.seats[data.seat] = data.user;
+        
+        if (data.user === state.username) {
+            state.mySeat = data.seat;
+        }
+
+        // Update UI Text
+        if (state.seats[1]) {
+            DOM.p1Name.innerText = state.seats[1];
+            DOM.seat1Btn.innerText = "SEAT TAKEN";
+            DOM.seat1Btn.disabled = true;
+        }
+        if (state.seats[2]) {
+            DOM.p2Name.innerText = state.seats[2];
+            DOM.seat2Btn.innerText = "SEAT TAKEN";
+            DOM.seat2Btn.disabled = true;
+        }
+
+        checkBettingLock();
     });
 
-    // You can add the specific Game Logic listeners here (dice roll, etc.)
-    // mapping them to the 'game_event' socket listener
-    socket.on('game_event', (data) => {
-        console.log("Game Event:", data);
-        // If data.type == 'dice', run the dice animation function
-    });
+    // --- SPECTATOR BETTING LOCK LOGIC ---
+    function checkBettingLock() {
+        if (!state.seats[1] || !state.seats[2]) {
+            DOM.betOverlay.style.display = 'flex';
+            DOM.betOverlay.innerHTML = "WAITING FOR<br>2 PLAYERS...";
+            DOM.status.innerText = "WAITING FOR PLAYERS...";
+        } else if (state.isGameRunning) {
+            DOM.betOverlay.style.display = 'flex';
+            DOM.betOverlay.innerHTML = "BETS LOCKED<br>MATCH IN PROGRESS";
+            DOM.status.innerText = "MATCH READY / IN PROGRESS";
+            document.getElementById('resetMatchBtn').disabled = false;
+        } else {
+            // Unlock betting! Both players seated, game not running
+            DOM.betOverlay.style.display = 'none';
+        }
+    }
+
+    // Spectator betting variables
+    let specBetOn = null;
+    function selectBet(player) {
+        specBetOn = player;
+        document.getElementById('betP1Btn').classList.toggle('selected', player===1);
+        document.getElementById('betP2Btn').classList.toggle('selected', player===2);
+    }
+
+    function placeSpectatorBet() {
+        const amt = parseInt(document.getElementById('betAmount').value);
+        if(!specBetOn) { alert("Select a Player first!"); return; }
+        if(isNaN(amt) || amt <= 0) { alert("Invalid amount"); return; }
+        if(amt > state.balance) { alert("Insufficient funds"); return; }
+
+        // Logic here to deduct money and send bet to server
+        state.balance -= amt;
+        DOM.wallet.innerText = `WALLET: ${state.balance} TC`;
+        alert(`Bet ${amt} TC on Player ${specBetOn}`);
+    }
+
+    // Mock functions to trigger game running state (Link these to your real game logic)
+    function setGameRunning(isRunning) {
+        state.isGameRunning = isRunning;
+        checkBettingLock();
+    }
 </script>
 </body>
 </html>
