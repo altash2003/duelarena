@@ -21,14 +21,13 @@ let gameState = {
     scores: { 1: 0, 2: 0 },
     turn: 1,
     matchActive: false,
+    bettingLocked: false, // New: Locks bets during animation
     
-    // Game Specific Memory
-    temp: { 
-        diceP1: null, 
-        rps: { 1: null, 2: null }, 
-        hlCurrent: 7, 
-        tttBoard: Array(9).fill(null)
-    }
+    // Active Bets for the current round: [ { user: 'Bob', amount: 50, target: 1 } ]
+    currentBets: [],
+
+    // Game Memory
+    temp: { diceP1: null, rps: { 1: null, 2: null }, hlCurrent: 7, tttBoard: Array(9).fill(null) }
 };
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -53,23 +52,38 @@ io.on('connection', (socket) => {
         if(currentUser) io.emit('chat_msg', { user: currentUser, text: msg, color: '#fff' });
     });
 
-    // SEATS & MATCH SETUP
+    // SPECTATOR BETTING
+    socket.on('place_bet', ({ amount, target }) => {
+        if (!currentUser || !gameState.matchActive || gameState.bettingLocked) return;
+        if (users[currentUser].balance < amount) return;
+
+        // Deduct money
+        users[currentUser].balance -= amount;
+        saveUsers();
+        
+        // Record bet
+        gameState.currentBets.push({ user: currentUser, amount, target });
+        
+        socket.emit('balance_update', users[currentUser].balance);
+        io.emit('chat_msg', { user: 'SYSTEM', text: `${currentUser} bet ${amount} on P${target}`, color: '#aaa' });
+    });
+
+    // SEATS
     socket.on('request_seat', (n) => {
         if (!currentUser || gameState.seats[n]) return;
         gameState.seats[n] = currentUser;
 
-        // Reset if Host (P1)
         if (n === 1 && !gameState.seats[2]) {
+            // HOST RESET
             gameState.matchActive = false;
             gameState.scores = { 1: 0, 2: 0 };
             gameState.turn = 1;
             gameState.temp = { diceP1: null, rps: { 1: null, 2: null }, hlCurrent: 7, tttBoard: Array(9).fill(null) };
         }
         
-        // Start if P2 Joins
         if (gameState.seats[1] && gameState.seats[2]) {
             gameState.matchActive = true;
-            io.emit('chat_msg', { user: 'SYSTEM', text: `MATCH STARTED: ${gameState.settings.game.toUpperCase()}`, color: '#2ecc71' });
+            io.emit('chat_msg', { user: 'SYSTEM', text: `MATCH STARTED!`, color: '#2ecc71' });
         }
         io.emit('state_update', gameState);
     });
@@ -87,7 +101,6 @@ io.on('connection', (socket) => {
         if (gameState.matchActive) { socket.emit('error_msg', "LOCKED: CANNOT LEAVE!"); return; }
         if (gameState.seats[1] === currentUser) gameState.seats[1] = null;
         if (gameState.seats[2] === currentUser) gameState.seats[2] = null;
-        gameState.scores = { 1: 0, 2: 0 };
         io.emit('state_update', gameState);
     });
 
@@ -95,16 +108,21 @@ io.on('connection', (socket) => {
     socket.on('game_action', (data) => {
         if (!gameState.matchActive) return;
         
+        // Turn Validation
         const isRPS = gameState.settings.game === 'rps';
         if (!isRPS && gameState.seats[gameState.turn] !== currentUser) return;
         if (isRPS && !Object.values(gameState.seats).includes(currentUser)) return;
+
+        // LOCK BETTING WHEN ACTION STARTS
+        gameState.bettingLocked = true;
+        io.emit('state_update', gameState);
 
         let win = null; 
         let roundOver = false;
         let switchTurn = true;
         const G = gameState.settings.game;
 
-        // LOGIC FOR GAMES
+        // --- GAME LOGIC ---
         if (G === 'dice') {
             const roll = [r6(), r6(), r6()];
             const total = roll.reduce((a,b)=>a+b,0);
@@ -112,6 +130,7 @@ io.on('connection', (socket) => {
             
             if (!gameState.temp.diceP1) {
                 gameState.temp.diceP1 = total;
+                // Don't unlock betting yet, wait for P2
             } else {
                 if (gameState.temp.diceP1 > total) win = 1;
                 else if (total > gameState.temp.diceP1) win = 2;
@@ -124,6 +143,7 @@ io.on('connection', (socket) => {
             const res = Math.random() < 0.5 ? 'H' : 'T';
             io.emit('anim_coin', { result: res });
             if (data.guess === res) { win = gameState.turn; roundOver = true; }
+            else { roundOver = true; } // Wrong guess ends round
         }
         else if (G === 'hl') {
             let next = r13();
@@ -133,6 +153,7 @@ io.on('connection', (socket) => {
             const isLow = (data.guess === 'low' && next < gameState.temp.hlCurrent);
             gameState.temp.hlCurrent = next;
             if (isHigh || isLow) { win = gameState.turn; roundOver = true; }
+            else { roundOver = true; }
         }
         else if (G === 'roulette') {
             const isRed = Math.random() < 0.5;
@@ -140,19 +161,23 @@ io.on('connection', (socket) => {
             const angle = 1080 + Math.random() * 360;
             io.emit('anim_roulette', { angle, result: res });
             if (data.guess === res) { win = gameState.turn; roundOver = true; }
+            else { roundOver = true; }
         }
         else if (G === 'rps') {
             const seat = gameState.seats[1] === currentUser ? 1 : 2;
             gameState.temp.rps[seat] = data.guess;
             io.emit('rps_lock', { seat });
             switchTurn = false;
+
             if (gameState.temp.rps[1] && gameState.temp.rps[2]) {
                 const p1 = gameState.temp.rps[1];
                 const p2 = gameState.temp.rps[2];
                 io.emit('rps_reveal', { p1, p2 });
+
                 if (p1 === p2) win = 'draw';
                 else if ((p1==='R'&&p2==='S') || (p1==='P'&&p2==='R') || (p1==='S'&&p2==='P')) win = 1;
                 else win = 2;
+                
                 gameState.temp.rps = { 1: null, 2: null };
                 roundOver = true; switchTurn = true;
             }
@@ -162,36 +187,63 @@ io.on('connection', (socket) => {
             const sym = gameState.turn === 1 ? 'X' : 'O';
             gameState.temp.tttBoard[data.index] = sym;
             io.emit('anim_ttt', { board: gameState.temp.tttBoard });
+
             if (checkTTTWin(sym)) { win = gameState.turn; roundOver = true; }
             else if (!gameState.temp.tttBoard.includes(null)) { win = 'draw'; roundOver = true; }
         }
 
+        // --- RESOLUTION ---
         if (roundOver || switchTurn) {
             setTimeout(() => {
-                if (roundOver && win) {
-                    if (win !== 'draw') {
+                // 1. Handle Game Results
+                if (roundOver) {
+                    if (win && win !== 'draw') {
                         gameState.scores[win]++;
-                        io.emit('chat_msg', { user: 'REF', text: `POINT P${win}`, color: '#2ecc71' });
-                        checkMatchWin();
-                    } else {
-                         io.emit('chat_msg', { user: 'REF', text: `DRAW`, color: '#aaa' });
+                        io.emit('chat_msg', { user: 'REF', text: `POINT PLAYER ${win}!`, color: '#2ecc71' });
+                        payoutBets(win); // PAYOUT SPECTATORS
+                    } else if (win === 'draw') {
+                        io.emit('chat_msg', { user: 'REF', text: `DRAW`, color: '#aaa' });
                     }
                     if(G==='ttt') gameState.temp.tttBoard = Array(9).fill(null);
+                    
+                    checkMatchWin();
                 }
+
+                // 2. Unlock Betting & Switch Turn
+                gameState.bettingLocked = false;
                 gameState.turn = gameState.turn === 1 ? 2 : 1;
                 io.emit('state_update', gameState);
-            }, 2500);
+
+            }, 2500); // Wait for animation
         }
     });
+
+    function payoutBets(winnerSeat) {
+        gameState.currentBets.forEach(bet => {
+            if (bet.target === winnerSeat) {
+                const payout = bet.amount * 2;
+                users[bet.user].balance += payout;
+                if(users[bet.user]) {
+                    // Notify specific user if connected? simpler to just broadcast REF
+                }
+            }
+        });
+        saveUsers();
+        // Clear bets
+        gameState.currentBets = [];
+    }
 
     function checkMatchWin() {
         const target = parseInt(gameState.settings.targetScore);
         let winner = null;
         if (gameState.scores[1] >= target) winner = 1;
         if (gameState.scores[2] >= target) winner = 2;
+
         if (winner) {
             gameState.matchActive = false;
             io.emit('match_over', { winner, name: gameState.seats[winner] });
+            
+            // Player Wager Payout
             const wager = parseInt(gameState.settings.wager);
             if (wager > 0) {
                 const loser = winner === 1 ? 2 : 1;
@@ -199,11 +251,13 @@ io.on('connection', (socket) => {
                 if(users[gameState.seats[loser]]) users[gameState.seats[loser]].balance -= wager;
                 saveUsers();
             }
+            
             gameState.scores = { 1: 0, 2: 0 };
             gameState.temp.tttBoard = Array(9).fill(null);
             io.emit('state_update', gameState);
         }
     }
+    
     function r6() { return Math.ceil(Math.random() * 6); }
     function r13() { return Math.ceil(Math.random() * 13); }
     function checkTTTWin(s) {
@@ -212,5 +266,6 @@ io.on('connection', (socket) => {
         return w.some(c => b[c[0]]===s && b[c[1]]===s && b[c[2]]===s);
     }
 });
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running`));
