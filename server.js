@@ -8,13 +8,13 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// --- DATA PERSISTENCE ---
+// --- 1. DATA STORAGE ---
 const DATA_FILE = 'users.json';
 let users = {}; 
 if (fs.existsSync(DATA_FILE)) { try { users = JSON.parse(fs.readFileSync(DATA_FILE)); } catch (e) { users = {}; } }
 function saveUsers() { fs.writeFileSync(DATA_FILE, JSON.stringify(users, null, 2)); }
 
-// --- GAME STATE ---
+// --- 2. GAME STATE ---
 let gameState = {
     seats: { 1: null, 2: null }, 
     sockets: { 1: null, 2: null },
@@ -27,7 +27,7 @@ let gameState = {
     matchActive: false,
     negotiating: false,
     bettingLocked: false,
-    currentBets: [], // { user, amount, target }
+    currentBets: [],
 
     // Game Memory
     temp: { 
@@ -44,60 +44,37 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 io.on('connection', (socket) => {
     let currentUser = null;
 
-    // --- 1. LOGIN / SIGNUP ---
+    // --- AUTH ---
     socket.on('auth', ({ username, password }) => {
-        if (!users[username]) { 
-            // Auto-Signup
-            users[username] = { password, balance: 1000 }; 
-            saveUsers(); 
-        }
-        
+        if (!users[username]) { users[username] = { password, balance: 1000 }; saveUsers(); }
         if (users[username].password === password) {
             currentUser = username;
             socket.emit('auth_success', { username, balance: users[username].balance });
-            
-            // Broadcast presence for Player List
             io.emit('player_joined', { username });
             io.emit('state_update', gameState);
-            updatePlayerList();
-        } else {
-            socket.emit('auth_fail', "INVALID PASSWORD");
-        }
+        } else socket.emit('auth_fail', "INVALID PASSWORD");
     });
 
-    function updatePlayerList() {
-        // Simple mock of online users based on connected sockets with auth
-        const online = [];
-        // In a real app, we'd map socket.id to user. Here we send a signal to refresh.
-        io.emit('refresh_players'); 
-    }
-
-    // --- 2. BANKING & TICKET ---
+    // --- BANKING ---
     socket.on('wallet_action', (data) => {
         if(!currentUser) return;
-        if(data.type === 'deposit') {
+        if(data.type === 'deposit') { users[currentUser].balance += parseInt(data.amount); }
+        else if (data.type === 'withdraw') { 
             const amt = parseInt(data.amount);
-            if(amt > 0) { users[currentUser].balance += amt; saveUsers(); }
-        } else if (data.type === 'withdraw') {
-            const amt = parseInt(data.amount);
-            if(amt > 0 && users[currentUser].balance >= amt) { users[currentUser].balance -= amt; saveUsers(); }
+            if(users[currentUser].balance >= amt) users[currentUser].balance -= amt; 
         }
+        saveUsers();
         socket.emit('balance_update', users[currentUser].balance);
-        if(data.type === 'ticket') { /* Log ticket logic here */ }
     });
 
-    // --- 3. MATCH & ROUNDS ---
+    // --- MATCH LOGIC ---
     socket.on('request_seat', (n) => {
-        if (!currentUser) return;
-        if (Object.values(gameState.seats).includes(currentUser)) return; // 1 Seat Rule
-        if (gameState.seats[n]) return;
-
+        if (!currentUser || Object.values(gameState.seats).includes(currentUser) || gameState.seats[n]) return;
+        
         gameState.seats[n] = currentUser;
         gameState.sockets[n] = socket.id;
-        
         if(!gameState.hostSeat) gameState.hostSeat = n;
 
-        // Trigger Proposal if both seated
         if (gameState.seats[1] && gameState.seats[2]) {
             gameState.negotiating = true;
             io.to(gameState.sockets[gameState.hostSeat]).emit('prompt_proposal');
@@ -123,6 +100,10 @@ io.on('connection', (socket) => {
             io.emit('chat_msg', { user: 'SYSTEM', text: `MATCH STARTED! ${gameState.settings.roundLabel}`, color: '#2ecc71' });
             io.emit('state_update', gameState);
             io.emit('game_reset', gameState.settings.game);
+            
+            // Voice
+            io.to(gameState.sockets[1]).emit('start_voice', { initiator: true });
+            io.to(gameState.sockets[2]).emit('start_voice', { initiator: false });
         } else {
             const s = gameState.hostSeat===1?2:1;
             const sock = gameState.sockets[s];
@@ -132,10 +113,9 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- 4. GAMEPLAY LOGIC ---
+    // --- GAMEPLAY ---
     socket.on('game_action', (data) => {
         if (!gameState.matchActive) return;
-        
         const isRPS = gameState.settings.game === 'rps';
         if (!isRPS && gameState.seats[gameState.turn] !== currentUser) return;
         if (isRPS && !Object.values(gameState.seats).includes(currentUser)) return;
@@ -146,7 +126,6 @@ io.on('connection', (socket) => {
         let win = null, roundOver = false, switchTurn = true;
         const G = gameState.settings.game;
 
-        // DICE (Dual)
         if(G==='dice') {
             const roll = [r6(),r6(),r6()], total = roll.reduce((a,b)=>a+b,0);
             io.emit('anim_dice', { seat: gameState.turn, roll });
@@ -158,12 +137,10 @@ io.on('connection', (socket) => {
                 gameState.temp.diceP1 = null; roundOver = true;
             }
         }
-        // COIN
         else if(G==='coin') {
             const res = Math.random()<0.5?'H':'T'; io.emit('anim_coin', {result:res});
             if(data.guess===res) { win=gameState.turn; roundOver=true; } else roundOver=true;
         }
-        // HI-LO
         else if(G==='hl') {
             let next=r13(); while(next===gameState.temp.hlCurrent) next=r13();
             io.emit('anim_hl', {current:gameState.temp.hlCurrent, next});
@@ -171,13 +148,11 @@ io.on('connection', (socket) => {
             gameState.temp.hlCurrent=next;
             if(success) { win=gameState.turn; roundOver=true; } else roundOver=true;
         }
-        // ROULETTE
         else if(G==='roulette') {
             const isRed=Math.random()<0.5, res=isRed?'RED':'BLACK', angle=1440+Math.random()*360;
             io.emit('anim_roulette', {angle, result:res});
             if(data.guess===res) { win=gameState.turn; roundOver=true; } else roundOver=true;
         }
-        // RPS
         else if(G==='rps') {
             const seat = gameState.seats[1]===currentUser?1:2;
             gameState.temp.rps[seat] = data.guess;
@@ -190,7 +165,6 @@ io.on('connection', (socket) => {
                 gameState.temp.rps={1:null,2:null}; roundOver=true; switchTurn=true;
             }
         }
-        // TTT
         else if(G==='ttt') {
             if(gameState.temp.tttBoard[data.index]) return;
             const sym = gameState.turn===1?'X':'O';
@@ -214,7 +188,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- 5. BETTING & VOICE ---
     socket.on('place_bet', ({amount, target}) => {
         if(!currentUser || !gameState.matchActive || gameState.bettingLocked) return;
         if(users[currentUser].balance >= amount) {
@@ -228,7 +201,7 @@ io.on('connection', (socket) => {
     socket.on('chat_msg', (msg) => { if(currentUser) io.emit('chat_msg', { user: currentUser, text: msg, color: '#fff' }); });
     
     function payoutBets(w) {
-        gameState.currentBets.forEach(b => { if(b.target===w) users[b.user].balance += b.amount*2; });
+        gameState.currentBets.forEach(b => { if(b.target===w && users[b.user]) users[b.user].balance += b.amount*2; });
         saveUsers(); gameState.currentBets=[];
     }
 
@@ -239,8 +212,7 @@ io.on('connection', (socket) => {
         if(gameState.scores[2] >= target) w = 2;
         if(w) {
             gameState.matchActive = false; gameState.hostSeat = null;
-            io.emit('match_over', { winner: w, name: gameState.seats[w] });
-            // Pay wagers
+            io.emit('match_over', { winner: w });
             const wage = parseInt(gameState.settings.wager);
             if(wage > 0) {
                 const l = w===1?2:1;
