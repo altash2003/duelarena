@@ -8,229 +8,189 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// --- DATA STORAGE ---
+// --- DATA ---
 const DATA_FILE = 'users.json';
-let users = {};
-if (fs.existsSync(DATA_FILE)) {
-    try { users = JSON.parse(fs.readFileSync(DATA_FILE)); } catch (e) { users = {}; }
-}
+let users = {}; 
+if (fs.existsSync(DATA_FILE)) { try { users = JSON.parse(fs.readFileSync(DATA_FILE)); } catch (e) { users = {}; } }
 function saveUsers() { fs.writeFileSync(DATA_FILE, JSON.stringify(users, null, 2)); }
 
 // --- GAME STATE ---
 let gameState = {
-    seats: { 1: null, 2: null }, // Username in seat
-    gameType: 'dice',            // Current active game tab
-    gameActive: false,           // Is a round currently playing? (Locks betting)
+    seats: { 1: null, 2: null },
+    settings: { 
+        game: 'dice', 
+        targetScore: 1, // 1 = Sudden Death, 2 = Best of 3, etc.
+        wager: 0 
+    },
+    scores: { 1: 0, 2: 0 },
+    turn: 1,
+    matchActive: false, // LOCKS THE SEATS
     
-    // Game Specific Memory
-    rps: { p1: null, p2: null },
+    // Sub-game states
+    rps: { 1: null, 2: null },
     ttt: Array(9).fill(null),
-    tttTurn: 'X', // X is always P1, O is P2
-    hlCurrent: 7, // Starting card for High-Low
+    hlCurrent: 7
 };
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
-app.get('/api/admin/data', (req, res) => res.json(users));
 
 io.on('connection', (socket) => {
     let currentUser = null;
 
     // --- AUTH ---
     socket.on('auth', ({ username, password }) => {
-        if (!users[username]) {
-            users[username] = { password, balance: 1000 };
-            saveUsers();
-        }
+        if (!users[username]) { users[username] = { password, balance: 1000 }; saveUsers(); }
         if (users[username].password === password) {
             currentUser = username;
             socket.emit('auth_success', { username, balance: users[username].balance });
-            socket.emit('state_update', gameState); // Send full current state
-            io.emit('chat_msg', { user: 'SYSTEM', text: `${username} JOINED`, color: '#feca57' });
+            socket.emit('state_update', gameState);
         } else {
             socket.emit('auth_fail', 'WRONG PASSWORD');
         }
     });
 
-    // --- SEATS ---
+    // --- SEATS & PROPOSAL ---
     socket.on('request_seat', (seatNum) => {
         if (!currentUser) return;
-        // If seat empty, take it
-        if (gameState.seats[seatNum] === null) {
-            // Remove from other seats
-            if (gameState.seats[1] === currentUser) gameState.seats[1] = null;
-            if (gameState.seats[2] === currentUser) gameState.seats[2] = null;
-            
-            gameState.seats[seatNum] = currentUser;
-            io.emit('update_seats', gameState.seats);
-            io.emit('chat_msg', { user: 'SYSTEM', text: `${currentUser} TOOK SEAT ${seatNum}`, color: '#2ecc71' });
+        if (gameState.seats[seatNum]) return; // Occupied
+
+        // Seat Logic
+        gameState.seats[seatNum] = currentUser;
+        
+        // If P1 sits and P2 is empty, P1 is HOST. Reset state.
+        if (seatNum === 1 && !gameState.seats[2]) {
+            gameState.matchActive = false;
+            gameState.scores = { 1: 0, 2: 0 };
+            gameState.turn = 1;
+            io.emit('chat_msg', { user: 'SYSTEM', text: `${currentUser} is setting up the match...`, color: '#feca57' });
         }
+        
+        // If P2 sits, match is ready to start (if settings exist)
+        if (gameState.seats[1] && gameState.seats[2]) {
+            io.emit('chat_msg', { user: 'SYSTEM', text: `MATCH STARTED! ${gameState.settings.game.toUpperCase()} - FIRST TO ${gameState.settings.targetScore}`, color: '#2ecc71' });
+            gameState.matchActive = true; // LOCK SEATS
+        }
+
+        io.emit('update_state', gameState);
+    });
+
+    // HOST SETTINGS
+    socket.on('update_settings', (settings) => {
+        // Only P1 can set terms
+        if (gameState.seats[1] !== currentUser) return;
+        if (gameState.matchActive) return; // Can't change during game
+
+        gameState.settings = settings;
+        // Reset sub-games
+        gameState.ttt = Array(9).fill(null);
+        gameState.hlCurrent = 7;
+        
+        io.emit('update_state', gameState);
     });
 
     socket.on('leave_seat', () => {
         if (!currentUser) return;
+        
+        // LOCK: Cannot leave if match is active
+        if (gameState.matchActive) {
+            socket.emit('error_msg', "YOU CANNOT LEAVE DURING A MATCH!");
+            return;
+        }
+
         if (gameState.seats[1] === currentUser) gameState.seats[1] = null;
         if (gameState.seats[2] === currentUser) gameState.seats[2] = null;
-        io.emit('update_seats', gameState.seats);
+        
+        // Reset game if someone leaves
+        gameState.scores = { 1: 0, 2: 0 };
+        io.emit('update_state', gameState);
     });
 
-    // --- GAME LOGIC ---
-    
-    // 1. Change Game Tab
-    socket.on('change_game', (game) => {
-        if(Object.values(gameState.seats).includes(currentUser)) {
-            gameState.gameType = game;
-            // Reset sub-states
-            gameState.ttt = Array(9).fill(null);
-            gameState.rps = { p1: null, p2: null };
-            io.emit('set_game', game);
-        }
-    });
+    // --- GAMEPLAY ENGINE ---
+    socket.on('game_action', (data) => {
+        if (!gameState.matchActive) return;
+        if (gameState.seats[gameState.turn] !== currentUser) return; // Not your turn
 
-    // 2. DICE ROLL
-    socket.on('action_dice', (seat) => {
-        gameState.gameActive = true;
-        io.emit('lock_betting', true);
-        
-        // Server calculates result to prevent cheating
-        const roll = [Math.ceil(Math.random()*6), Math.ceil(Math.random()*6), Math.ceil(Math.random()*6)];
-        const total = roll.reduce((a,b)=>a+b,0);
-        
-        io.emit('anim_dice', { seat, roll, total });
-        
-        setTimeout(() => { 
-            gameState.gameActive = false; 
-            io.emit('lock_betting', false); 
-        }, 2000);
-    });
+        let win = false;
+        let nextTurn = gameState.turn === 1 ? 2 : 1;
+        let roundOver = false;
 
-    // 3. COIN FLIP
-    socket.on('action_coin', ({ seat, guess }) => {
-        gameState.gameActive = true;
-        io.emit('lock_betting', true);
-
-        const isHeads = Math.random() < 0.5;
-        const result = isHeads ? 'H' : 'T';
-        const win = (guess === result);
-
-        io.emit('anim_coin', { seat, result, win });
-        
-        setTimeout(() => { 
-            gameState.gameActive = false; 
-            io.emit('lock_betting', false); 
-        }, 3000);
-    });
-
-    // 4. HIGH-LOW
-    socket.on('action_hl', ({ seat, guess }) => {
-        gameState.gameActive = true;
-        io.emit('lock_betting', true);
-
-        let next = Math.ceil(Math.random()*13);
-        while(next === gameState.hlCurrent) next = Math.ceil(Math.random()*13); // No ties
-        
-        const win = (guess === 'high' && next > gameState.hlCurrent) || (guess === 'low' && next < gameState.hlCurrent);
-        const old = gameState.hlCurrent;
-        gameState.hlCurrent = next;
-
-        io.emit('anim_hl', { seat, next, win });
-        
-        setTimeout(() => { 
-            gameState.gameActive = false; 
-            io.emit('lock_betting', false); 
-        }, 2000);
-    });
-
-    // 5. ROULETTE
-    socket.on('action_roulette', ({ seat, guess }) => {
-        gameState.gameActive = true;
-        io.emit('lock_betting', true);
-
-        // 0-360 degrees. Let's map sectors. 
-        // Simple logic: Random color Red/Black
-        const isRed = Math.random() < 0.5;
-        const result = isRed ? 'RED' : 'BLACK';
-        const angle = 1080 + Math.random() * 360; // Spin animation value
-        const win = (guess === result);
-
-        io.emit('anim_roulette', { seat, result, angle, win });
-
-        setTimeout(() => { 
-            gameState.gameActive = false; 
-            io.emit('lock_betting', false); 
-        }, 3500);
-    });
-
-    // 6. RPS (Rock Paper Scissors)
-    socket.on('action_rps', ({ seat, choice }) => {
-        gameState.gameActive = true;
-        io.emit('lock_betting', true);
-
-        if(seat === 1) gameState.rps.p1 = choice;
-        if(seat === 2) gameState.rps.p2 = choice;
-
-        io.emit('rps_lock', seat); // Tell everyone this player picked (don't show what yet)
-
-        // If both picked, reveal
-        if(gameState.rps.p1 && gameState.rps.p2) {
-            const p1 = gameState.rps.p1;
-            const p2 = gameState.rps.p2;
-            let winner = 0; // 0 draw, 1 p1, 2 p2
-
-            if(p1 !== p2) {
-                if((p1==='R'&&p2==='S') || (p1==='P'&&p2==='R') || (p1==='S'&&p2==='P')) winner = 1;
-                else winner = 2;
-            }
-
-            io.emit('rps_reveal', { p1, p2, winner });
+        // 1. DICE
+        if (gameState.settings.game === 'dice') {
+            const roll = [r6(), r6(), r6()];
+            const total = roll.reduce((a,b)=>a+b,0);
+            io.emit('anim_dice', { seat: gameState.turn, roll, total });
             
-            // Reset
-            gameState.rps = { p1: null, p2: null };
-            setTimeout(() => { 
-                gameState.gameActive = false; 
-                io.emit('lock_betting', false); 
-            }, 3000);
-        }
-    });
-
-    // 7. TIC TAC TOE
-    socket.on('action_ttt', ({ index, seat }) => {
-        // Validation
-        if(gameState.ttt[index] !== null) return; // Spot taken
-        const symbol = seat === 1 ? 'X' : 'O';
-        
-        gameState.ttt[index] = symbol;
-        io.emit('anim_ttt', { index, symbol, nextTurn: seat === 1 ? 2 : 1 });
-
-        // Check Win (Simple)
-        const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
-        let winner = null;
-        wins.forEach(c => {
-            if(gameState.ttt[c[0]] && gameState.ttt[c[0]] === gameState.ttt[c[1]] && gameState.ttt[c[0]] === gameState.ttt[c[2]]) {
-                winner = gameState.ttt[c[0]] === 'X' ? 1 : 2;
+            // Logic: P1 rolls, then P2 rolls. Compare.
+            if (!gameState.tempDice) {
+                gameState.tempDice = total; // Store P1 roll
+            } else {
+                // P2 rolled. Compare.
+                if (gameState.tempDice > total) { win = 1; } // P1 Wins
+                else if (total > gameState.tempDice) { win = 2; } // P2 Wins
+                else { win = 'draw'; }
+                
+                gameState.tempDice = null; // Reset
+                roundOver = true;
             }
-        });
-
-        if(winner || !gameState.ttt.includes(null)) {
-            io.emit('ttt_over', { winner });
-            gameState.ttt = Array(9).fill(null); // Reset board
         }
-    });
-
-    // --- CHAT ---
-    socket.on('chat_msg', (msg) => {
-        if (currentUser) io.emit('chat_message', { user: currentUser, text: msg, color: '#fff' });
-    });
-
-    socket.on('disconnect', () => {
-        if (currentUser) {
-            if (gameState.seats[1] === currentUser) gameState.seats[1] = null;
-            if (gameState.seats[2] === currentUser) gameState.seats[2] = null;
-            io.emit('update_seats', gameState.seats);
+        // 2. COIN (Guessing)
+        else if (gameState.settings.game === 'coin') {
+            const res = Math.random() < 0.5 ? 'H' : 'T';
+            const success = (data.guess === res);
+            io.emit('anim_coin', { seat: gameState.turn, result: res });
+            
+            if (success) { win = gameState.turn; roundOver = true; } // Correct guess = point
+            // If wrong, just switch turn, no point
         }
+        
+        // --- HANDLE RESULTS ---
+        setTimeout(() => {
+            if (roundOver) {
+                if (win === 'draw') {
+                    io.emit('chat_msg', { user: 'REF', text: "DRAW! Play again.", color: '#aaa' });
+                    // Turn goes back to P1 to start over logic or swap? Let's swap.
+                } else if (win) {
+                    gameState.scores[win]++;
+                    io.emit('chat_msg', { user: 'REF', text: `POINT FOR PLAYER ${win}!`, color: '#2ecc71' });
+                    checkMatchWin();
+                }
+            }
+            
+            gameState.turn = nextTurn;
+            io.emit('update_state', gameState);
+        }, 2000); // Wait for animation
     });
+
+    function checkMatchWin() {
+        const target = parseInt(gameState.settings.targetScore);
+        let winner = null;
+
+        if (gameState.scores[1] >= target) winner = 1;
+        if (gameState.scores[2] >= target) winner = 2;
+
+        if (winner) {
+            gameState.matchActive = false; // UNLOCK SEATS
+            io.emit('match_over', { winner, name: gameState.seats[winner] });
+            
+            // Handle Money
+            const wager = parseInt(gameState.settings.wager);
+            if (wager > 0) {
+                const loser = winner === 1 ? 2 : 1;
+                // Simplified database update
+                if(users[gameState.seats[winner]]) users[gameState.seats[winner]].balance += wager;
+                if(users[gameState.seats[loser]]) users[gameState.seats[loser]].balance -= wager;
+                saveUsers();
+            }
+            
+            // Reset scores for next setup
+            gameState.scores = { 1: 0, 2: 0 };
+        }
+    }
+
+    function r6() { return Math.ceil(Math.random() * 6); }
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`Server running`));
