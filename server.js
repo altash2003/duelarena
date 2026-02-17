@@ -162,8 +162,6 @@ io.on('connection', (socket) => {
                 switchTurn = true;
             } else {
                 // P2 just rolled, compare with stored P1
-                // Re-broadcast P1's dice just in case (optional, but good for late joiners)
-                
                 if (gameState.temp.diceP1 > total) win = 1;
                 else if (total > gameState.temp.diceP1) win = 2;
                 else win = 'draw';
@@ -244,11 +242,6 @@ io.on('connection', (socket) => {
                 gameState.bettingLocked = false;
                 if(!gameState.matchActive) return; // Don't switch if match ended
                 
-                // Switch logic: In Dice, always swap. In others, swap. 
-                // Dice Special: P1 -> P2 (Compare) -> P1 (New Round)
-                // Actually, simple swap works fine for Dice too because of the 2-step process.
-                // Step 1: P1 rolls. switchTurn=true. gamestate.turn becomes 2.
-                // Step 2: P2 rolls. roundOver=true. gamestate.turn becomes 1.
                 gameState.turn = gameState.turn === 1 ? 2 : 1;
                 io.emit('state_update', gameState);
             }, delay);
