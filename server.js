@@ -19,23 +19,14 @@ let gameState = {
     seats: { 1: null, 2: null }, 
     sockets: { 1: null, 2: null },
     hostSeat: null,
-    
     settings: { game: 'dice', targetScore: 1, roundLabel: "SUDDEN DEATH", wager: 0 },
     scores: { 1: 0, 2: 0 },
     turn: 1,
-    
     matchActive: false,
     negotiating: false,
     bettingLocked: false,
     currentBets: [],
-
-    // Game Memory
-    temp: { 
-        diceP1: null, diceRollP1: [], 
-        rps: { 1: null, 2: null }, 
-        hlCurrent: 7, 
-        tttBoard: Array(9).fill(null) 
-    }
+    temp: { diceP1: null, diceRollP1: [], rps: { 1: null, 2: null }, hlCurrent: 7, tttBoard: Array(9).fill(null) }
 };
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -45,23 +36,39 @@ io.on('connection', (socket) => {
     let currentUser = null;
 
     // --- AUTH ---
-    socket.on('auth', ({ username, password }) => {
-        if (!users[username]) { users[username] = { password, balance: 1000 }; saveUsers(); }
-        if (users[username].password === password) {
-            currentUser = username;
-            socket.emit('auth_success', { username, balance: users[username].balance });
-            io.emit('player_joined', { username });
-            io.emit('state_update', gameState);
-        } else socket.emit('auth_fail', "INVALID PASSWORD");
+    socket.on('auth', ({ type, username, password }) => {
+        if (type === 'signup') {
+            if (users[username]) {
+                socket.emit('auth_fail', "USERNAME TAKEN");
+            } else {
+                users[username] = { password, balance: 1000 }; 
+                saveUsers();
+                currentUser = username;
+                socket.emit('auth_success', { username, balance: 1000 });
+                io.emit('player_joined', { username });
+                io.emit('state_update', gameState);
+            }
+        } else {
+            // LOGIN
+            if (users[username] && users[username].password === password) {
+                currentUser = username;
+                socket.emit('auth_success', { username, balance: users[username].balance });
+                io.emit('player_joined', { username });
+                io.emit('state_update', gameState);
+            } else {
+                socket.emit('auth_fail', "INVALID CREDENTIALS");
+            }
+        }
     });
 
     // --- BANKING ---
     socket.on('wallet_action', (data) => {
         if(!currentUser) return;
-        if(data.type === 'deposit') { users[currentUser].balance += parseInt(data.amount); }
-        else if (data.type === 'withdraw') { 
-            const amt = parseInt(data.amount);
-            if(users[currentUser].balance >= amt) users[currentUser].balance -= amt; 
+        const amt = parseInt(data.amount);
+        if(data.type === 'deposit') { 
+            if(amt > 0) users[currentUser].balance += amt; 
+        } else if (data.type === 'withdraw') { 
+            if(amt > 0 && users[currentUser].balance >= amt) users[currentUser].balance -= amt; 
         }
         saveUsers();
         socket.emit('balance_update', users[currentUser].balance);
@@ -69,8 +76,10 @@ io.on('connection', (socket) => {
 
     // --- MATCH LOGIC ---
     socket.on('request_seat', (n) => {
-        if (!currentUser || Object.values(gameState.seats).includes(currentUser) || gameState.seats[n]) return;
-        
+        if (!currentUser) return;
+        if (Object.values(gameState.seats).includes(currentUser)) { socket.emit('alert', "ALREADY SEATED"); return; }
+        if (gameState.seats[n]) return;
+
         gameState.seats[n] = currentUser;
         gameState.sockets[n] = socket.id;
         if(!gameState.hostSeat) gameState.hostSeat = n;
@@ -97,11 +106,10 @@ io.on('connection', (socket) => {
             gameState.turn = 1;
             gameState.temp = { diceP1: null, diceRollP1: [], rps: { 1: null, 2: null }, hlCurrent: 7, tttBoard: Array(9).fill(null) };
             
-            io.emit('chat_msg', { user: 'SYSTEM', text: `MATCH STARTED! ${gameState.settings.roundLabel}`, color: '#2ecc71' });
+            io.emit('chat_msg', { user: 'SYSTEM', text: `MATCH STARTED!`, color: '#2ecc71' });
             io.emit('state_update', gameState);
             io.emit('game_reset', gameState.settings.game);
             
-            // Voice
             io.to(gameState.sockets[1]).emit('start_voice', { initiator: true });
             io.to(gameState.sockets[2]).emit('start_voice', { initiator: false });
         } else {
